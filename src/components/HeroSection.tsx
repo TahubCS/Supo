@@ -17,7 +17,7 @@ export function HeroSection() {
         >
           <span className="h-1.5 w-1.5 rounded-full bg-foreground animate-pulse" />
           <span className="text-xs text-[color:var(--text-secondary)]">
-            Now with GPT-4o integration
+            Now with Gemini 3.1 integration
           </span>
         </motion.div>
 
