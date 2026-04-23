@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { SocialButtons } from "@/components/auth/SocialButtons";
@@ -12,14 +12,21 @@ import { authClient } from "@/lib/auth-client";
 
 export default function SignInPage() {
   const router = useRouter();
+  const params = useSearchParams();
+  const justReset = params.get("reset") === "1";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [unverified, setUnverified] = useState(false);
+  const [resendPending, setResendPending] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
   const [pending, setPending] = useState(false);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
+    setUnverified(false);
+    setResendSent(false);
     setPending(true);
 
     const { error: signInError } = await authClient.signIn.email({
@@ -28,7 +35,11 @@ export default function SignInPage() {
     });
 
     if (signInError) {
-      setError(signInError.message ?? "Sign in failed");
+      if (signInError.message === "Email not verified") {
+        setUnverified(true);
+      } else {
+        setError(signInError.message ?? "Sign in failed");
+      }
       setPending(false);
       return;
     }
@@ -37,8 +48,24 @@ export default function SignInPage() {
     router.refresh();
   };
 
+  const resendVerification = async () => {
+    setResendPending(true);
+    await authClient.sendVerificationEmail({
+      email,
+      callbackURL: "/dashboard",
+    });
+    setResendSent(true);
+    setResendPending(false);
+    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
+  };
+
   return (
     <div className="rounded-lg border border-border bg-card p-8">
+      {justReset ? (
+        <p className="mb-4 rounded-lg border border-border bg-[color:var(--card-elevated)] px-4 py-3 text-sm text-[color:var(--text-secondary)]">
+          Password reset. Sign in with your new password.
+        </p>
+      ) : null}
       <h1 className="mb-2 text-2xl font-bold tracking-tight text-foreground">
         Welcome back
       </h1>
@@ -67,7 +94,11 @@ export default function SignInPage() {
             autoComplete="email"
             required
             value={email}
-            onChange={(event) => setEmail(event.target.value)}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              setUnverified(false);
+              setError(null);
+            }}
             placeholder="you@example.com"
           />
         </div>
@@ -96,6 +127,28 @@ export default function SignInPage() {
             onChange={(event) => setPassword(event.target.value)}
           />
         </div>
+
+        {unverified ? (
+          <div className="rounded-lg border border-border bg-[color:var(--card-elevated)] px-4 py-3 text-sm">
+            <p className="mb-2 text-[color:var(--text-secondary)]">
+              This email hasn&apos;t been verified yet.
+            </p>
+            {resendSent ? (
+              <p className="text-[color:var(--text-secondary)]">
+                Verification email sent — check your inbox.
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={resendVerification}
+                disabled={resendPending}
+                className="font-medium text-foreground hover:underline disabled:opacity-50"
+              >
+                {resendPending ? "Sending…" : "Resend verification email →"}
+              </button>
+            )}
+          </div>
+        ) : null}
 
         {error ? (
           <p className="text-sm text-[color:var(--status-error,#ef4444)]">

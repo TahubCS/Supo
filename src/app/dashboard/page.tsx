@@ -9,12 +9,18 @@ import { db } from "@/db";
 import { member, organization } from "@/db/schema";
 import { auth } from "@/lib/auth";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ teamName?: string }>;
+}) {
   const session = await auth.api.getSession({ headers: await headers() });
 
   if (!session) {
     redirect("/sign-in");
   }
+
+  const { teamName } = await searchParams;
 
   const userOrgs = await db
     .select({ id: organization.id, name: organization.name, role: member.role })
@@ -23,18 +29,21 @@ export default async function DashboardPage() {
     .where(eq(member.userId, session.user.id));
 
   if (userOrgs.length === 0) {
+    const defaultName =
+      teamName ??
+      `${session.user.name.split(" ")[0] || "My"}'s workspace`;
+
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
         <div className="w-full max-w-md">
-          <CreateWorkspaceForm
-            defaultName={`${session.user.name.split(" ")[0] || "My"}'s workspace`}
-          />
+          <CreateWorkspaceForm defaultName={defaultName} />
         </div>
       </div>
     );
   }
 
   const activeOrg = userOrgs[0];
+  const emailVerified = session.user.emailVerified;
 
   return (
     <div className="min-h-screen bg-background">
@@ -53,6 +62,20 @@ export default async function DashboardPage() {
           <SignOutButton />
         </div>
       </header>
+
+      {!emailVerified ? (
+        <div className="border-b border-border bg-[color:var(--card-elevated)] px-6 py-3">
+          <p className="mx-auto max-w-7xl text-sm text-[color:var(--text-secondary)]">
+            Please verify your email address.{" "}
+            <a
+              href={`/verify-email?email=${encodeURIComponent(session.user.email)}`}
+              className="text-foreground hover:underline"
+            >
+              Resend verification email
+            </a>
+          </p>
+        </div>
+      ) : null}
 
       <main className="mx-auto max-w-7xl px-6 py-16">
         <p className="mb-3 text-sm text-[color:var(--text-secondary)]">

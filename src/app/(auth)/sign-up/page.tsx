@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
-import { generateOrgSlug } from "@/lib/slug";
 
 export default function SignUpPage() {
   const router = useRouter();
@@ -32,18 +31,6 @@ export default function SignUpPage() {
 
     if (signUpError) {
       setError(signUpError.message ?? "Sign up failed");
-      setPending(false);
-      return;
-    }
-
-    const workspaceName = `${name.split(" ")[0] || "My"}'s workspace`;
-    const { error: orgError } = await authClient.organization.create({
-      name: workspaceName,
-      slug: generateOrgSlug(workspaceName),
-    });
-
-    if (orgError) {
-      setError(orgError.message ?? "Workspace creation failed");
       setPending(false);
       return;
     }
