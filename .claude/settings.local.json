@@ -3,7 +3,8 @@
     "allow": [
       "Bash(bunx tsc *)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(bun run *)"
+      "Bash(bun run *)",
+      "Bash(bunx tsx *)"
     ]
   }
 }
