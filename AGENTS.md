@@ -111,7 +111,8 @@ This is the workspace management surface.
 
 ### Auth
 
-- Prefer `Better Auth` unless the user explicitly chooses `Clerk`
+- Prefer `Better Auth` as the default authentication solution
+- Do not default to `Clerk` for this project unless the user explicitly chooses it
 - Keep auth decoupled from the database provider
 
 ### Storage
@@ -202,7 +203,8 @@ At minimum, the architecture should support these domain entities:
 
 - Use `Supo` as the product name by default.
 - Build toward the five-product architecture above.
-- Prefer `Neon + Postgres 18 + Drizzle`.
+- Prefer `Neon + Postgres 18 + Drizzle + Better Auth`.
+- Do not introduce `Clerk` unless the user explicitly asks for it.
 - Do not introduce Supabase unless the user explicitly asks for it.
 - Do not introduce AWS services.
 - Reuse prebuilt components before building new ones.
@@ -211,4 +213,5 @@ At minimum, the architecture should support these domain entities:
 - Do not create custom infrastructure or abstractions without a real need.
 - When editing frontend code, preserve the established visual language unless the user asks for a redesign.
 - When adding a new component, explain briefly why an existing component could not be reused.
+- Whenever the architecture, stack decisions, product boundaries, or engineering rules change, update `AGENTS.md` in the same body of work so the file stays current.
     
