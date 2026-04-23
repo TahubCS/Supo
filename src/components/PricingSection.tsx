@@ -2,6 +2,7 @@
 
 import { Check } from "lucide-react";
 import { motion } from "motion/react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ const pricingPlans = [
       "7-day chat history",
     ],
     cta: "Start free trial",
+    href: "/sign-up",
     highlighted: false,
   },
   {
@@ -37,6 +39,7 @@ const pricingPlans = [
       "Custom integrations",
     ],
     cta: "Start free trial",
+    href: "/sign-up/team",
     highlighted: true,
   },
   {
@@ -54,6 +57,7 @@ const pricingPlans = [
       "Dedicated account manager",
     ],
     cta: "Contact sales",
+    href: "/sign-up/team",
     highlighted: false,
   },
 ];
@@ -181,6 +185,7 @@ export function PricingSection() {
                 </ul>
 
                 <Button
+                  asChild
                   variant={plan.highlighted ? "default" : "outline"}
                   className={`w-full rounded-lg ${
                     plan.highlighted
@@ -188,7 +193,7 @@ export function PricingSection() {
                       : "border-border bg-transparent text-[color:var(--text-secondary)] hover:border-[color:var(--text-secondary)] hover:bg-transparent hover:text-foreground"
                   }`}
                 >
-                  {plan.cta}
+                  <Link href={plan.href}>{plan.cta}</Link>
                 </Button>
               </div>
             </motion.div>

@@ -46,17 +46,19 @@ export function Navbar() {
           <div className="flex items-center gap-3">
             <ThemeToggle />
             <Button
+              asChild
               variant="ghost"
               size="sm"
               className="hidden rounded-lg text-[color:var(--text-secondary)] hover:bg-card hover:text-foreground sm:inline-flex"
             >
-              Sign In
+              <Link href="/sign-in">Sign In</Link>
             </Button>
             <Button
+              asChild
               size="sm"
               className="rounded-lg bg-foreground text-background hover:bg-foreground/90"
             >
-              Get Started
+              <Link href="/sign-up">Get Started</Link>
             </Button>
           </div>
         </div>
