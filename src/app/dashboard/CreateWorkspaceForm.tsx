@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,15 @@ import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
 import { generateOrgSlug } from "@/lib/slug";
 
-export function CreateWorkspaceForm({ defaultName }: { defaultName: string }) {
+export function CreateWorkspaceForm({
+  defaultName,
+  isTeam = false,
+}: {
+  defaultName: string;
+  isTeam?: boolean;
+}) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const isTeam = searchParams.get("onboarding") === "team";
-  const [name, setName] = useState(isTeam ? "" : defaultName);
+  const [name, setName] = useState(defaultName);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

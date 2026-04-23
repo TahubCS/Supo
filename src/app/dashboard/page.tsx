@@ -36,7 +36,7 @@ export default async function DashboardPage({
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
         <div className="w-full max-w-md">
-          <CreateWorkspaceForm defaultName={defaultName} />
+          <CreateWorkspaceForm defaultName={defaultName} isTeam={!!teamName} />
         </div>
       </div>
     );
