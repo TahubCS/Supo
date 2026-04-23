@@ -4,7 +4,8 @@
       "Bash(bunx tsc *)",
       "Bash(echo \"EXIT=$?\")",
       "Bash(bun run *)",
-      "Bash(bunx tsx *)"
+      "Bash(bunx tsx *)",
+      "Bash(bun add *)"
     ]
   }
 }
