@@ -1,41 +1,61 @@
-import { MessageCircle } from 'lucide-react';
-import { Button } from './Button';
+import { MessageCircle } from "lucide-react";
+import Link from "next/link";
+
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { Button } from "@/components/ui/button";
 
 export function Navbar() {
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-[rgba(10,15,30,0.8)] backdrop-blur-2xl border-b border-[--glass-border]">
-      <div className="max-w-7xl mx-auto px-6 py-4">
+    <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
+      <div className="mx-auto max-w-7xl px-6 py-3">
         <div className="flex items-center justify-between">
-          {/* Logo */}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-[--primary] to-[--accent] flex items-center justify-center">
-              <MessageCircle className="w-5 h-5 text-white" />
+          <Link href="/" className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded bg-foreground">
+              <MessageCircle className="size-4 text-background" />
             </div>
-            <span className="text-xl font-bold text-white">SupportAI</span>
-          </div>
+            <span className="text-base font-semibold text-foreground">Supo</span>
+          </Link>
 
-          {/* Center Links */}
-          <div className="hidden md:flex items-center gap-8">
-            <a href="#features" className="text-[--foreground] hover:text-white transition-colors text-sm">
+          <div className="hidden items-center gap-6 md:flex">
+            <Link
+              href="#features"
+              className="text-sm text-[color:var(--text-secondary)] transition-colors hover:text-foreground"
+            >
               Features
-            </a>
-            <a href="#pricing" className="text-[--foreground] hover:text-white transition-colors text-sm">
+            </Link>
+            <Link
+              href="#pricing"
+              className="text-sm text-[color:var(--text-secondary)] transition-colors hover:text-foreground"
+            >
               Pricing
-            </a>
-            <a href="#api" className="text-[--foreground] hover:text-white transition-colors text-sm">
-              API Docs
-            </a>
-            <a href="#changelog" className="text-[--foreground] hover:text-white transition-colors text-sm">
-              Changelog
-            </a>
+            </Link>
+            <Link
+              href="#api"
+              className="text-sm text-[color:var(--text-secondary)] transition-colors hover:text-foreground"
+            >
+              API
+            </Link>
+            <Link
+              href="#docs"
+              className="text-sm text-[color:var(--text-secondary)] transition-colors hover:text-foreground"
+            >
+              Documentation
+            </Link>
           </div>
 
-          {/* Right Actions */}
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm">
-              Dashboard →
+            <ThemeToggle />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="hidden rounded-lg text-[color:var(--text-secondary)] hover:bg-card hover:text-foreground sm:inline-flex"
+            >
+              Sign In
             </Button>
-            <Button variant="primary" size="sm">
+            <Button
+              size="sm"
+              className="rounded-lg bg-foreground text-background hover:bg-foreground/90"
+            >
               Get Started
             </Button>
           </div>

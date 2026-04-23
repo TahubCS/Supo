@@ -2,81 +2,117 @@
 
 :root {
   --font-size: 16px;
-  --background: #0A0F1E;
-  --foreground: #F9FAFB;
-  --card: #111827;
-  --card-foreground: #F9FAFB;
-  --popover: #111827;
-  --popover-foreground: #F9FAFB;
-  --primary: #6366F1;
-  --primary-foreground: #F9FAFB;
-  --secondary: #111827;
-  --secondary-foreground: #F9FAFB;
-  --muted: #1F2937;
-  --muted-foreground: #6B7280;
-  --accent: #06B6D4;
-  --accent-foreground: #F9FAFB;
-  --destructive: #EF4444;
-  --destructive-foreground: #F9FAFB;
-  --border: #1F2937;
-  --input: transparent;
-  --input-background: rgba(255, 255, 255, 0.04);
-  --switch-background: #1F2937;
+  --background: #f6f7fb;
+  --foreground: #0f1728;
+  --card: #ffffff;
+  --card-foreground: #0f1728;
+  --popover: #ffffff;
+  --popover-foreground: #0f1728;
+  --primary: #6366f1;
+  --primary-foreground: #f9fafb;
+  --secondary: #eef2f9;
+  --secondary-foreground: #0f1728;
+  --muted: #edf1f7;
+  --muted-foreground: #64748b;
+  --accent: #06b6d4;
+  --accent-foreground: #f9fafb;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #d8e1ee;
+  --input: #d8e1ee;
+  --input-background: rgba(255, 255, 255, 0.72);
+  --switch-background: #d8e1ee;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #6366F1;
-  --chart-1: #6366F1;
-  --chart-2: #06B6D4;
-  --chart-3: #10B981;
-  --chart-4: #F59E0B;
-  --chart-5: #EF4444;
+  --ring: #606cf6;
+  --chart-1: #0f1728;
+  --chart-2: #606cf6;
+  --chart-3: #0f9f6e;
+  --chart-4: #c97a13;
+  --chart-5: #dc2626;
   --radius: 0.75rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f1728;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #f9fafb;
+  --sidebar-accent: #edf1f7;
+  --sidebar-accent-foreground: #0f1728;
+  --sidebar-border: #d8e1ee;
+  --sidebar-ring: #606cf6;
 
-  /* Dark SaaS Theme Colors */
+  --glass-background: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(110, 123, 147, 0.18);
+  --glow-indigo: rgba(99, 102, 241, 0.28);
+  --glow-cyan: rgba(6, 182, 212, 0.2);
+  --status-success: #10b981;
+  --status-warning: #f59e0b;
+  --status-error: #ef4444;
+  --status-online: #10b981;
+  --status-offline: #ef4444;
+  --code-surface: #0d1117;
+  --code-foreground: #e6edf3;
+  --avatar-surface: #edf1f7;
+  --bot-bubble: #6366f1;
+  --nav-background: #f6f7fb;
+  --card-elevated: #ffffff;
+  --border-subtle: #e8edf5;
+  --text-secondary: #64748b;
+  --text-tertiary: #94a3b8;
+}
+
+.dark {
+  --background: #000000;
+  --foreground: #f9fafb;
+  --card: #0a0a0a;
+  --card-foreground: #f9fafb;
+  --popover: #0a0a0a;
+  --popover-foreground: #f9fafb;
+  --primary: #6366f1;
+  --primary-foreground: #f9fafb;
+  --secondary: #111111;
+  --secondary-foreground: #f9fafb;
+  --muted: #171717;
+  --muted-foreground: #a3a3a3;
+  --accent: #06b6d4;
+  --accent-foreground: #f9fafb;
+  --destructive: #ef4444;
+  --destructive-foreground: #f9fafb;
+  --border: #262626;
+  --input: #262626;
+  --input-background: rgba(255, 255, 255, 0.04);
+  --switch-background: #262626;
+  --ring: #6366f1;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: #6366f1;
+  --chart-2: #06b6d4;
+  --chart-3: #10b981;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+  --sidebar: #0a0a0a;
+  --sidebar-foreground: #f9fafb;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #f9fafb;
+  --sidebar-accent: #171717;
+  --sidebar-accent-foreground: #f9fafb;
+  --sidebar-border: #262626;
+  --sidebar-ring: #6366f1;
+
   --glass-background: rgba(255, 255, 255, 0.04);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glow-indigo: rgba(99, 102, 241, 0.4);
   --glow-cyan: rgba(6, 182, 212, 0.4);
-  --status-success: #10B981;
-  --status-warning: #F59E0B;
-  --status-error: #EF4444;
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --font-weight-medium: 500;
-  --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --status-online: #10b981;
+  --status-offline: #ef4444;
+  --code-surface: #0d1117;
+  --code-foreground: #e6edf3;
+  --avatar-surface: #192133;
+  --bot-bubble: #6366f1;
+  --nav-background: #000000;
+  --card-elevated: #141414;
+  --border-subtle: #1a1a1a;
+  --text-secondary: #a3a3a3;
+  --text-tertiary: #737373;
 }
 
 @theme inline {
@@ -125,17 +161,21 @@
     @apply border-border outline-ring/50;
   }
 
-  body {
-    @apply bg-background text-foreground;
-  }
-
-  /**
-  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
-  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
-  */
-
   html {
     font-size: var(--font-size);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    background-image:
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.55), transparent 32rem),
+      radial-gradient(circle at top, rgba(99, 102, 241, 0.1), transparent 30rem);
+    background-attachment: fixed;
+  }
+
+  .dark body {
+    background-image: none;
   }
 
   h1 {
@@ -180,12 +220,6 @@
     line-height: 1.5;
   }
 
-  /* Smooth scrolling */
-  html {
-    scroll-behavior: smooth;
-  }
-
-  /* Hide scrollbar for testimonials scroll */
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;

@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 
+import { ThemeProvider } from "@/components/theme-provider";
+
 import "../styles/index.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "SupportAI",
-    template: "%s | SupportAI",
+    default: "Supo",
+    template: "%s | Supo",
   },
+  description:
+    "Supo is an AI support platform for teams that need automation, human handoff, and operational visibility in one place.",
 };
 
 export default function RootLayout({
@@ -15,8 +19,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body className="antialiased">
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }

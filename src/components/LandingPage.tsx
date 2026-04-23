@@ -11,7 +11,7 @@ import { TestimonialsSection } from '@/components/TestimonialsSection';
 
 export function LandingPage() {
   return (
-    <div className="min-h-screen bg-[--background] text-[--foreground]">
+    <div className="min-h-screen bg-background text-foreground">
       <Navbar />
       <HeroSection />
       <FeaturesSection />

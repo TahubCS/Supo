@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bunx tsc *)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(bun run *)"
+    ]
+  }
+}
