@@ -104,9 +104,10 @@ export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, { fields: [account.userId], references: [user.id] }),
 }));
 
-export const organizationRelations = relations(organization, ({ many }) => ({
+export const organizationRelations = relations(organization, ({ many, one }) => ({
   members: many(member),
   invitations: many(invitation),
+  widgetConfig: one(widgetConfig),
 }));
 
 export const memberRelations = relations(member, ({ one }) => ({
@@ -123,4 +124,28 @@ export const invitationRelations = relations(invitation, ({ one }) => ({
     references: [organization.id],
   }),
   inviter: one(user, { fields: [invitation.inviterId], references: [user.id] }),
+}));
+
+export const widgetConfig = pgTable("widget_config", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .unique()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  botName: text("bot_name").notNull().default("Support"),
+  greeting: text("greeting")
+    .notNull()
+    .default("Hi there! How can I help you today?"),
+  position: text("position").notNull().default("bottom-right"),
+  theme: text("theme").notNull().default("dark"),
+  accentColor: text("accent_color").notNull().default("#18181b"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const widgetConfigRelations = relations(widgetConfig, ({ one }) => ({
+  organization: one(organization, {
+    fields: [widgetConfig.organizationId],
+    references: [organization.id],
+  }),
 }));
