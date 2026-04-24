@@ -43,7 +43,7 @@ export default async function WorkspaceLayout({
         orgName={activeOrg.name}
         emailVerified={session.user.emailVerified}
       />
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto scroll-smooth">{children}</main>
     </div>
   );
 }
