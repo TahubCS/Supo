@@ -1,0 +1,308 @@
+"use client";
+
+import { format, isSameDay } from "date-fns";
+import { MessageSquare } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+
+import {
+  getMessages,
+  resolveConversation,
+  reopenConversation,
+  sendMessage,
+  snoozeConversation,
+} from "./actions";
+import type { ConversationWithDetails } from "./types";
+
+type MessageRow = {
+  id: string;
+  conversationId: string;
+  body: string;
+  senderType: string;
+  senderId: string | null;
+  createdAt: Date;
+};
+
+function DateSeparator({ date }: { date: Date }) {
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <div className="h-px flex-1 bg-border" />
+      <span className="text-[10px] text-[color:var(--text-tertiary)]">
+        {format(date, "MMMM d, yyyy")}
+      </span>
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+function MessageBubble({ msg }: { msg: MessageRow }) {
+  const isAgent = msg.senderType === "agent";
+  const isAI = msg.senderType === "ai";
+
+  if (isAgent) {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[75%] space-y-1">
+          <div className="rounded-lg bg-foreground px-3 py-2 text-sm text-background">
+            {msg.body}
+          </div>
+          <p className="text-right text-[10px] text-[color:var(--text-tertiary)]">
+            {format(msg.createdAt, "h:mm a")}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[75%] space-y-1">
+        {isAI && (
+          <p className="text-[10px] font-medium text-[color:var(--text-tertiary)]">AI</p>
+        )}
+        <div
+          className={`rounded-lg border border-border px-3 py-2 text-sm ${
+            isAI ? "bg-[color:var(--card-elevated)]" : "bg-card"
+          } text-foreground`}
+        >
+          {msg.body}
+        </div>
+        <p className="text-[10px] text-[color:var(--text-tertiary)]">
+          {format(msg.createdAt, "h:mm a")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function ConversationThread({
+  conversation,
+}: {
+  conversation: ConversationWithDetails | null;
+}) {
+  const router = useRouter();
+  const [messages, setMessages] = useState<MessageRow[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [replyBody, setReplyBody] = useState("");
+  const [isPending, startTransition] = useTransition();
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!conversation) {
+      setMessages([]);
+      return;
+    }
+    setLoadingMessages(true);
+    getMessages(conversation.id).then((msgs) => {
+      setMessages(msgs as MessageRow[]);
+      setLoadingMessages(false);
+    });
+  }, [conversation?.id]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  if (!conversation) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
+        <MessageSquare className="size-8 text-[color:var(--text-tertiary)]" />
+        <p className="text-sm text-[color:var(--text-secondary)]">
+          Select a conversation
+        </p>
+      </div>
+    );
+  }
+
+  function handleResolve() {
+    if (!conversation) return;
+    startTransition(async () => {
+      await resolveConversation(conversation.id);
+      router.refresh();
+    });
+  }
+
+  function handleSnooze() {
+    if (!conversation) return;
+    startTransition(async () => {
+      await snoozeConversation(conversation.id);
+      router.refresh();
+    });
+  }
+
+  function handleReopen() {
+    if (!conversation) return;
+    startTransition(async () => {
+      await reopenConversation(conversation.id);
+      router.refresh();
+    });
+  }
+
+  function handleSend() {
+    if (!conversation || !replyBody.trim()) return;
+    const body = replyBody.trim();
+    setReplyBody("");
+    startTransition(async () => {
+      await sendMessage(conversation.id, body);
+      const updated = await getMessages(conversation.id);
+      setMessages(updated as MessageRow[]);
+      router.refresh();
+    });
+  }
+
+  const isResolved = conversation.status === "resolved";
+
+  // Group messages with date separators
+  const grouped: Array<{ separator: Date } | { msg: MessageRow }> = [];
+  let lastDate: Date | null = null;
+  for (const msg of messages) {
+    if (!lastDate || !isSameDay(lastDate, msg.createdAt)) {
+      grouped.push({ separator: msg.createdAt });
+      lastDate = msg.createdAt;
+    }
+    grouped.push({ msg });
+  }
+
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Sticky header */}
+      <div className="flex items-center justify-between border-b border-border px-5 py-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-foreground truncate">
+                {conversation.customer.name}
+              </span>
+              {conversation.status === "open" ? (
+                <Badge
+                  variant="outline"
+                  className="h-4 shrink-0 rounded-full px-1.5 text-[10px] font-normal"
+                >
+                  Open
+                </Badge>
+              ) : conversation.status === "resolved" ? (
+                <Badge className="h-4 shrink-0 rounded-full bg-foreground px-1.5 text-[10px] font-normal text-background hover:bg-foreground">
+                  Resolved
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="h-4 shrink-0 rounded-full px-1.5 text-[10px] font-normal text-[color:var(--text-secondary)]"
+                >
+                  Snoozed
+                </Badge>
+              )}
+              {conversation.aiHandled && (
+                <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[10px] text-[color:var(--text-tertiary)]">
+                  AI
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-[color:var(--text-secondary)] truncate">
+              {conversation.customer.email}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {isResolved ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isPending}
+              onClick={handleReopen}
+              className="rounded-lg border-border text-xs text-[color:var(--text-secondary)] hover:border-[color:var(--text-secondary)] hover:text-foreground"
+            >
+              Reopen
+            </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isPending}
+                onClick={handleSnooze}
+                className="rounded-lg border-border text-xs text-[color:var(--text-secondary)] hover:border-[color:var(--text-secondary)] hover:text-foreground"
+              >
+                Snooze
+              </Button>
+              <Button
+                size="sm"
+                disabled={isPending}
+                onClick={handleResolve}
+                className="rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
+              >
+                Resolve
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Messages area */}
+      <div className="flex-1 overflow-y-auto scroll-smooth px-5 py-4">
+        {loadingMessages ? (
+          <div className="space-y-4">
+            {[false, true, false, true].map((right, i) => (
+              <div key={i} className={`flex ${right ? "justify-end" : "justify-start"}`}>
+                <Skeleton className="h-12 w-48 rounded-lg" />
+              </div>
+            ))}
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-[color:var(--text-tertiary)]">No messages yet</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {grouped.map((item, i) =>
+              "separator" in item ? (
+                <DateSeparator key={`sep-${i}`} date={item.separator} />
+              ) : (
+                <MessageBubble key={item.msg.id} msg={item.msg} />
+              ),
+            )}
+            <div ref={bottomRef} />
+          </div>
+        )}
+      </div>
+
+      {/* Reply composer */}
+      <div className="border-t border-border px-4 py-3">
+        <Textarea
+          placeholder="Reply…"
+          value={replyBody}
+          onChange={(e) => setReplyBody(e.target.value)}
+          rows={3}
+          maxLength={2000}
+          disabled={isPending}
+          className="resize-none text-sm"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
+        />
+        <div className="mt-2 flex items-center justify-between">
+          <span className="text-xs text-[color:var(--text-tertiary)]">
+            {replyBody.length}/2000
+          </span>
+          <Button
+            size="sm"
+            disabled={isPending || !replyBody.trim()}
+            onClick={handleSend}
+            className="rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
+          >
+            Send
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

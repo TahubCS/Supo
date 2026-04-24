@@ -94,6 +94,8 @@ export const userRelations = relations(user, ({ many }) => ({
   accounts: many(account),
   members: many(member),
   invitations: many(invitation),
+  assignedConversations: many(conversation),
+  sentMessages: many(message),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -108,6 +110,7 @@ export const organizationRelations = relations(organization, ({ many }) => ({
   members: many(member),
   invitations: many(invitation),
   products: many(product),
+  customers: many(customer),
 }));
 
 export const memberRelations = relations(member, ({ one }) => ({
@@ -145,6 +148,7 @@ export const productRelations = relations(product, ({ one, many }) => ({
     references: [organization.id],
   }),
   widgetConfigs: many(widgetConfig),
+  conversations: many(conversation),
 }));
 
 export const widgetConfig = pgTable("widget_config", {
@@ -168,5 +172,80 @@ export const widgetConfigRelations = relations(widgetConfig, ({ one }) => ({
   product: one(product, {
     fields: [widgetConfig.productId],
     references: [product.id],
+  }),
+}));
+
+export const customer = pgTable("customer", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+export const customerRelations = relations(customer, ({ one, many }) => ({
+  organization: one(organization, {
+    fields: [customer.organizationId],
+    references: [organization.id],
+  }),
+  conversations: many(conversation),
+}));
+
+export const conversation = pgTable("conversation", {
+  id: text("id").primaryKey(),
+  productId: text("product_id")
+    .notNull()
+    .references(() => product.id, { onDelete: "cascade" }),
+  customerId: text("customer_id")
+    .notNull()
+    .references(() => customer.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("open"),
+  assigneeId: text("assignee_id").references(() => user.id, {
+    onDelete: "set null",
+  }),
+  aiHandled: boolean("ai_handled").notNull().default(true),
+  subject: text("subject"),
+  lastMessageAt: timestamp("last_message_at").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const conversationRelations = relations(conversation, ({ one, many }) => ({
+  product: one(product, {
+    fields: [conversation.productId],
+    references: [product.id],
+  }),
+  customer: one(customer, {
+    fields: [conversation.customerId],
+    references: [customer.id],
+  }),
+  assignee: one(user, {
+    fields: [conversation.assigneeId],
+    references: [user.id],
+  }),
+  messages: many(message),
+}));
+
+export const message = pgTable("message", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id")
+    .notNull()
+    .references(() => conversation.id, { onDelete: "cascade" }),
+  body: text("body").notNull(),
+  senderType: text("sender_type").notNull(),
+  senderId: text("sender_id").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+export const messageRelations = relations(message, ({ one }) => ({
+  conversation: one(conversation, {
+    fields: [message.conversationId],
+    references: [conversation.id],
+  }),
+  sender: one(user, {
+    fields: [message.senderId],
+    references: [user.id],
   }),
 }));

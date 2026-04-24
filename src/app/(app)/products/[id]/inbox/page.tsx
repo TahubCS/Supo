@@ -1,23 +1,55 @@
-import { MessageSquare } from "lucide-react";
+import { desc, eq } from "drizzle-orm";
+import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 
-export default function InboxPage() {
-  return (
-    <div className="px-8 py-8">
-      <p className="mb-3 text-sm text-[color:var(--text-secondary)]">Inbox</p>
-      <h1 className="mb-8 text-3xl font-bold tracking-tight text-foreground">
-        Conversations
-      </h1>
+import { db } from "@/db";
+import { conversation, member, message, product } from "@/db/schema";
+import { auth } from "@/lib/auth";
 
-      <div className="flex min-h-[420px] flex-col items-center justify-center rounded-lg border border-border bg-card p-12 text-center">
-        <MessageSquare className="mb-4 size-8 text-[color:var(--text-secondary)]" />
-        <h2 className="mb-2 text-base font-medium text-foreground">
-          No conversations yet
-        </h2>
-        <p className="max-w-sm text-sm text-[color:var(--text-secondary)]">
-          Customer conversations and AI-escalated support cases will appear here
-          once your widget is live.
-        </p>
-      </div>
-    </div>
+import { InboxView } from "./InboxView";
+import type { ConversationWithDetails } from "./types";
+
+export default async function InboxPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return null;
+
+  const membership = await db.query.member.findFirst({
+    where: eq(member.userId, session.user.id),
+  });
+  if (!membership) notFound();
+
+  const foundProduct = await db.query.product.findFirst({
+    where: eq(product.id, id),
+  });
+  if (!foundProduct || foundProduct.organizationId !== membership.organizationId) {
+    notFound();
+  }
+
+  const conversations = await db.query.conversation.findMany({
+    where: eq(conversation.productId, id),
+    with: { customer: { columns: { id: true, name: true, email: true } } },
+    orderBy: [desc(conversation.lastMessageAt)],
+  });
+
+  const withMessages: ConversationWithDetails[] = await Promise.all(
+    conversations.map(async (conv) => {
+      const latest = await db.query.message.findFirst({
+        where: eq(message.conversationId, conv.id),
+        orderBy: [desc(message.createdAt)],
+        columns: { id: true, body: true, senderType: true, createdAt: true },
+      });
+      return {
+        ...conv,
+        latestMessage: latest ?? null,
+      };
+    }),
   );
+
+  return <InboxView conversations={withMessages} />;
 }
