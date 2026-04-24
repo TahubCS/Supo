@@ -126,12 +126,33 @@ export const invitationRelations = relations(invitation, ({ one }) => ({
   inviter: one(user, { fields: [invitation.inviterId], references: [user.id] }),
 }));
 
-export const widgetConfig = pgTable("widget_config", {
+export const product = pgTable("product", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id")
     .notNull()
-    .unique()
     .references(() => organization.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category").notNull().default("other"),
+  url: text("url"),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const productRelations = relations(product, ({ one, many }) => ({
+  organization: one(organization, {
+    fields: [product.organizationId],
+    references: [organization.id],
+  }),
+  widgetConfigs: many(widgetConfig),
+}));
+
+export const widgetConfig = pgTable("widget_config", {
+  id: text("id").primaryKey(),
+  productId: text("product_id")
+    .notNull()
+    .unique()
+    .references(() => product.id, { onDelete: "cascade" }),
   botName: text("bot_name").notNull().default("Support"),
   greeting: text("greeting")
     .notNull()
@@ -144,8 +165,8 @@ export const widgetConfig = pgTable("widget_config", {
 });
 
 export const widgetConfigRelations = relations(widgetConfig, ({ one }) => ({
-  organization: one(organization, {
-    fields: [widgetConfig.organizationId],
-    references: [organization.id],
+  product: one(product, {
+    fields: [widgetConfig.productId],
+    references: [product.id],
   }),
 }));
