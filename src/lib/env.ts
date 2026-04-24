@@ -18,4 +18,5 @@ export const env = {
   GITHUB_CLIENT_ID: requireEnv("GITHUB_CLIENT_ID"),
   GITHUB_CLIENT_SECRET: requireEnv("GITHUB_CLIENT_SECRET"),
   RESEND_API_KEY: requireEnv("RESEND_API_KEY"),
+  GOOGLE_GEMINI_API_KEY: requireEnv("GOOGLE_GEMINI_API_KEY"),
 };

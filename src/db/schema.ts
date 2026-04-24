@@ -1,5 +1,6 @@
 import { relations } from "drizzle-orm";
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { vector } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -138,6 +139,7 @@ export const product = pgTable("product", {
   description: text("description"),
   category: text("category").notNull().default("other"),
   url: text("url"),
+  embeddingModel: text("embedding_model"), // locked on first index, never changed
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
@@ -149,6 +151,7 @@ export const productRelations = relations(product, ({ one, many }) => ({
   }),
   widgetConfigs: many(widgetConfig),
   conversations: many(conversation),
+  knowledgeSources: many(knowledgeSource),
 }));
 
 export const widgetConfig = pgTable("widget_config", {
@@ -247,5 +250,54 @@ export const messageRelations = relations(message, ({ one }) => ({
   sender: one(user, {
     fields: [message.senderId],
     references: [user.id],
+  }),
+}));
+
+export const knowledgeSource = pgTable("knowledge_source", {
+  id: text("id").primaryKey(),
+  productId: text("product_id")
+    .notNull()
+    .references(() => product.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // "article" | "url" | "github" | "conversation"
+  name: text("name").notNull(),
+  url: text("url"),
+  content: text("content"),
+  status: text("status").notNull().default("pending"), // "pending" | "indexing" | "indexed" | "error"
+  errorMessage: text("error_message"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  createdAt: timestamp("created_at").notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+export const knowledgeSourceRelations = relations(knowledgeSource, ({ one, many }) => ({
+  product: one(product, {
+    fields: [knowledgeSource.productId],
+    references: [product.id],
+  }),
+  chunks: many(knowledgeChunk),
+}));
+
+export const knowledgeChunk = pgTable("knowledge_chunk", {
+  id: text("id").primaryKey(),
+  sourceId: text("source_id")
+    .notNull()
+    .references(() => knowledgeSource.id, { onDelete: "cascade" }),
+  productId: text("product_id")
+    .notNull()
+    .references(() => product.id, { onDelete: "cascade" }),
+  content: text("content").notNull(),
+  embedding: vector("embedding", { dimensions: 768 }),
+  metadata: text("metadata"), // JSON: { title, url, chunkIndex }
+  createdAt: timestamp("created_at").notNull(),
+});
+
+export const knowledgeChunkRelations = relations(knowledgeChunk, ({ one }) => ({
+  source: one(knowledgeSource, {
+    fields: [knowledgeChunk.sourceId],
+    references: [knowledgeSource.id],
+  }),
+  product: one(product, {
+    fields: [knowledgeChunk.productId],
+    references: [product.id],
   }),
 }));

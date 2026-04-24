@@ -1,25 +1,45 @@
-import { BookOpen } from "lucide-react";
+import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 
-export default function KnowledgePage() {
+import { db } from "@/db";
+import { knowledgeSource, member, product } from "@/db/schema";
+import { auth } from "@/lib/auth";
+
+import { KnowledgeBase } from "./KnowledgeBase";
+
+export default async function KnowledgePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return null;
+
+  const membership = await db.query.member.findFirst({
+    where: eq(member.userId, session.user.id),
+  });
+  if (!membership) notFound();
+
+  const foundProduct = await db.query.product.findFirst({
+    where: eq(product.id, id),
+  });
+  if (!foundProduct || foundProduct.organizationId !== membership.organizationId) {
+    notFound();
+  }
+
+  const sources = await db.query.knowledgeSource.findMany({
+    where: eq(knowledgeSource.productId, id),
+    orderBy: (s, { desc }) => [desc(s.createdAt)],
+  });
+
   return (
     <div className="px-8 py-8">
-      <p className="mb-3 text-sm text-[color:var(--text-secondary)]">
-        Knowledge
-      </p>
-      <h1 className="mb-8 text-3xl font-bold tracking-tight text-foreground">
-        Knowledge base
-      </h1>
-
-      <div className="flex min-h-[420px] flex-col items-center justify-center rounded-lg border border-border bg-card p-12 text-center">
-        <BookOpen className="mb-4 size-8 text-[color:var(--text-secondary)]" />
-        <h2 className="mb-2 text-base font-medium text-foreground">
-          No sources yet
-        </h2>
-        <p className="max-w-sm text-sm text-[color:var(--text-secondary)]">
-          Upload documents, FAQs, or connect a URL so the AI can answer customer
-          questions accurately.
-        </p>
-      </div>
+      <p className="mb-3 text-sm text-[color:var(--text-secondary)]">Knowledge</p>
+      <h1 className="mb-8 text-3xl font-bold tracking-tight text-foreground">Knowledge base</h1>
+      <KnowledgeBase productId={id} sources={sources} />
     </div>
   );
 }

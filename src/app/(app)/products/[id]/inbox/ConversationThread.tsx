@@ -1,9 +1,10 @@
 "use client";
 
 import { format, isSameDay } from "date-fns";
-import { MessageSquare } from "lucide-react";
+import { BookOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 
 import {
   getMessages,
+  learnFromConversation,
   resolveConversation,
   reopenConversation,
   sendMessage,
@@ -143,6 +145,18 @@ export function ConversationThread({
     });
   }
 
+  function handleLearn() {
+    if (!conversation) return;
+    startTransition(async () => {
+      try {
+        await learnFromConversation(conversation.id);
+        toast.success("Added to knowledge base");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to learn from conversation");
+      }
+    });
+  }
+
   function handleSend() {
     if (!conversation || !replyBody.trim()) return;
     const body = replyBody.trim();
@@ -211,15 +225,28 @@ export function ConversationThread({
 
         <div className="flex items-center gap-2 shrink-0">
           {isResolved ? (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={isPending}
-              onClick={handleReopen}
-              className="rounded-lg border-border text-xs text-[color:var(--text-secondary)] hover:border-[color:var(--text-secondary)] hover:text-foreground"
-            >
-              Reopen
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={isPending}
+                onClick={handleLearn}
+                title="Extract FAQ and add to knowledge base"
+                className="gap-1.5 rounded-lg text-xs text-[color:var(--text-secondary)] hover:text-foreground"
+              >
+                <BookOpen className="size-3.5" />
+                Learn
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isPending}
+                onClick={handleReopen}
+                className="rounded-lg border-border text-xs text-[color:var(--text-secondary)] hover:border-[color:var(--text-secondary)] hover:text-foreground"
+              >
+                Reopen
+              </Button>
+            </div>
           ) : (
             <>
               <Button
