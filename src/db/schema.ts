@@ -104,10 +104,10 @@ export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, { fields: [account.userId], references: [user.id] }),
 }));
 
-export const organizationRelations = relations(organization, ({ many, one }) => ({
+export const organizationRelations = relations(organization, ({ many }) => ({
   members: many(member),
   invitations: many(invitation),
-  widgetConfig: one(widgetConfig),
+  products: many(product),
 }));
 
 export const memberRelations = relations(member, ({ one }) => ({

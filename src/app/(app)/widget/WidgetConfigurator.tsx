@@ -38,7 +38,7 @@ function WidgetPreview({
   const inputText = isDark ? "#71717a" : "#a1a1aa";
 
   return (
-    <div className="relative h-80 overflow-hidden rounded-lg border border-border bg-[color:var(--card-elevated)]">
+    <div className="relative h-full min-h-64 overflow-hidden rounded-lg border border-border bg-[color:var(--card-elevated)]">
       {/* Simulated page content */}
       <div className="space-y-2 p-6">
         {PAGE_LINES.map((w, i) => (
@@ -273,11 +273,13 @@ export function WidgetConfigurator({
         </div>
 
         {/* Right: live preview */}
-        <div>
+        <div className="flex flex-col">
           <p className="mb-3 text-xs text-[color:var(--text-secondary)]">
             Preview
           </p>
-          <WidgetPreview {...config} />
+          <div className="flex-1">
+            <WidgetPreview {...config} />
+          </div>
         </div>
       </div>
 
