@@ -39,7 +39,7 @@ export default async function ProductLayout({
         productId={id}
         productName={foundProduct.name}
       />
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto scroll-smooth">{children}</main>
     </div>
   );
 }
