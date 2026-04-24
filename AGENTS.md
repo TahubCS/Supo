@@ -128,7 +128,7 @@ This is the workspace management surface.
 - Current tables in `src/db/schema.ts`:
   - Better Auth core: `user`, `session`, `account`, `verification`
   - Organization plugin: `organization`, `member`, `invitation`
-  - App-owned: `product`, `widget_config`
+  - App-owned: `product`, `widget_config`, `customer`, `conversation`, `message`, `knowledge_source`, `knowledge_chunk`
 - `product` is the first app-owned table. It belongs to an `organization` and is the unit around which knowledge, conversations, widget config, and analytics are scoped.
 - `widget_config` is scoped to `product_id` (one-to-one), not `organization_id`. Do not revert this — widget config is per-product, not per-workspace.
 - The `organization` table is the tenant anchor. Do not reintroduce a separate `workspaces` table — the earlier placeholder was dropped on purpose.
@@ -158,7 +158,7 @@ This is the workspace management surface.
 - `experimental.joins: true` is enabled for relational query performance.
 - `requireEmailVerification: false` is currently set — email verification flow is fully implemented with Resend but deliberately disabled until a verified sending domain is configured. Flip this to `true` and add the domain to re-enable it.
 - Transactional email (verification, password reset) uses `Resend` via `onboarding@resend.dev`. This sender only delivers to the Resend account owner's email without a verified domain. The `RESEND_API_KEY` env var is required.
-- Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
+- Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`, `GOOGLE_GEMINI_API_KEY`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
 
 ### Storage
 
@@ -201,7 +201,13 @@ src/app/
           ConversationThread.tsx          ← right panel: sticky header, message bubbles, reply composer
           actions.ts                      ← getMessages, resolveConversation, snoozeConversation, reopenConversation, sendMessage
           types.ts                        ← ConversationWithDetails type shared across inbox components
-        knowledge/page.tsx
+        knowledge/
+          page.tsx                        ← server component: fetches knowledge sources, renders KnowledgeBase
+          KnowledgeBase.tsx               ← client orchestrator: SourceList + AddSourceDialog + TestQueryPanel
+          SourceList.tsx                  ← grid of source cards with status badges, re-index, delete
+          AddSourceDialog.tsx             ← dialog: Article / URL / GitHub segmented type selector
+          TestQueryPanel.tsx              ← test Q&A: question input → RAG answer + source citations
+          actions.ts                      ← addSource, deleteSource, reindexSource, testQuery
         analytics/page.tsx
   (auth)/
     layout.tsx
@@ -213,6 +219,9 @@ src/app/
     verify-email/page.tsx
   api/
     auth/[...all]/route.ts
+    knowledge/
+      ingest/route.ts                     ← POST: background ingestion (maxDuration=300); auth via x-api-key
+      query/route.ts                      ← POST: RAG query (embed → pgvector search → generate)
 
 src/components/
   WorkspaceSidebar.tsx                  ← workspace-level nav (Products, Settings, user/sign-out)
@@ -231,6 +240,9 @@ src/lib/
   auth-client.ts                        ← Better Auth browser client
   env.ts                                ← validated env vars
   slug.ts                               ← org slug generator
+  knowledge/
+    ai.ts                               ← geminiEmbed, geminiEmbedMany, geminiGenerate (9-model fallback chain)
+    ingest.ts                           ← chunkText, fetchUrl, fetchGitHub, ingestText, ingestSource
 
 src/styles/
   theme.css                             ← global tokens, scroll-behavior: smooth on html
@@ -321,11 +333,13 @@ The Better Auth tables live in `src/db/schema.ts` and are the source of truth fo
 
 App-owned tables currently in `src/db/schema.ts`:
 
-- `product` — a product owned by an `organization`. All per-product features (widget, inbox, knowledge, analytics) are scoped under a product. Columns: `id`, `organization_id`, `name`, `description`, `category`, `url`, `created_at`, `updated_at`.
+- `product` — a product owned by an `organization`. All per-product features (widget, inbox, knowledge, analytics) are scoped under a product. Columns: `id`, `organization_id`, `name`, `description`, `category`, `url`, `embedding_model`, `created_at`, `updated_at`. The `embedding_model` column stores the locked-in Gemini embedding model for this product — set on first index and never changed, to prevent vector space mismatch.
 - `widget_config` — one-to-one with `product` via `product_id`. Stores bot name, greeting, position, theme, accent color. The `product_id` column has a UNIQUE constraint enforcing the 1:1 relationship.
 - `customer` — org-scoped. Represents the end-user who initiates support conversations. Columns: `id`, `organization_id`, `name`, `email`, `created_at`.
 - `conversation` — product-scoped. A support thread between a customer and the product's support surface. Columns: `id`, `product_id`, `customer_id`, `status` (open/resolved/snoozed), `assignee_id`, `ai_handled`, `subject`, `last_message_at`, `created_at`, `updated_at`.
 - `message` — conversation-scoped. Individual messages within a conversation. Columns: `id`, `conversation_id`, `body`, `sender_type` (customer/ai/agent), `sender_id`, `created_at`.
+- `knowledge_source` — product-scoped. A single knowledge source (article, URL, GitHub repo, or extracted conversation). Columns: `id`, `product_id`, `type` (article/url/github/conversation), `name`, `url`, `content`, `status` (pending/indexing/indexed/error), `error_message`, `chunk_count`, `created_at`, `updated_at`.
+- `knowledge_chunk` — source-scoped (denormalized `product_id` for fast search). Stores one text chunk with its pgvector embedding. Columns: `id`, `source_id`, `product_id`, `content`, `embedding` (vector(768)), `metadata` (JSON: title/url/chunkIndex), `created_at`. Has an HNSW index on `embedding` using cosine distance.
 
 ### Tenancy model
 
@@ -343,8 +357,6 @@ Do not attach product-scoped data directly to `organization_id` — it must go t
 - `ticket_assignments` (product-scoped)
 - `tags` (product-scoped)
 - `conversation_tags` (product-scoped)
-- `knowledge_sources` (product-scoped)
-- `knowledge_documents` (product-scoped)
 - `automations` (product-scoped)
 - `events` (product-scoped)
 
@@ -365,7 +377,7 @@ Every app-owned table must:
 - When schema files change, generate and apply migrations in the same body of work when feasible.
 - If the database layer changes materially, update `AGENTS.md` to reflect the new source-of-truth files and commands.
 - `bun run db:generate` requires a TTY to resolve column rename conflicts interactively. If running in a non-TTY environment (CI, agent shells), write the migration SQL and snapshot manually and record the hash in `drizzle.__drizzle_migrations` after applying it.
-- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables).
+- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index).
 
 ## Theme Rules
 
@@ -493,6 +505,56 @@ When porting new sections or building dashboard screens, read these files as the
 - `src/components/CTABanner.tsx` — the only centered section, still flat black.
 - `src/components/Footer.tsx` — 5-column grid with muted link treatment.
 - `src/components/Navbar.tsx` — the only surface allowed to use `bg-background/80 backdrop-blur-xl`.
+
+## AI Knowledge Stack
+
+### Packages
+
+- `ai` (Vercel AI SDK v4) — unified interface for embed, embedMany, generateText
+- `@ai-sdk/google` — Google provider; used for both generation and embeddings via `createGoogleGenerativeAI`
+
+### Generation model chain
+
+`src/lib/knowledge/ai.ts` maintains a 9-model fallback chain ranked by 2026 benchmarks. Models are tried in order; the chain exhausts before throwing, so the app never hard-crashes on a single model error:
+
+```
+gemini-3-flash → gemini-3.1-flash-lite → gemini-2.5-flash →
+gemma-4-31b → gemma-4-26b → gemini-2.5-flash-lite →
+gemma-3-27b → gemma-3-12b → gemma-3-4b
+```
+
+All calls go through `geminiGenerate(prompt, systemPrompt)` — do not call the Google SDK directly elsewhere.
+
+### Embedding model lock-in
+
+One embedding model is assigned per product and stored in `product.embedding_model`. It is set on the first ingest call and **never changed** — mixing models within a product corrupts vector space and breaks retrieval.
+
+- Current model: `gemini-embedding-001` (768-dim natively, hnsw-indexable)
+- `gemini-embedding-002` is excluded: @ai-sdk/google v3 does not expose `outputDimensionality` in TypeScript types, so its 3072-dim output cannot be safely dimensioned to fit pgvector's 2000-dim index limit.
+- `text-embedding-004` is discontinued — do not use it.
+- `resolveEmbeddingModel(productId)` checks the DB first (fast path), probes models only on first call.
+- All embedding calls go through `geminiEmbed` / `geminiEmbedMany` — never call `google.textEmbeddingModel()` directly.
+
+### Ingestion pipeline
+
+`src/lib/knowledge/ingest.ts`:
+- `chunkText(text)` — paragraph-based split, ~800 char chunks, 200-char overlap
+- `fetchUrl(url)` — fetch → strip HTML → max 100KB plain text
+- `fetchGitHub(repoUrl)` — fetches README + `docs/` `.md` files from public repos via GitHub Contents API (max 20 files, no auth needed)
+- `ingestText(text, sourceId, productId, metadata)` — chunk → embed (batch 50) → insert → update source status
+- `ingestSource(sourceId, productId)` — dispatches to ingestText by source type; sets status="error" on failure
+
+### Background ingestion pattern
+
+Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return immediately. The API route uses `export const maxDuration = 300` to support up to 5 minutes of ingestion work without blocking the UI. Auth is a shared `BETTER_AUTH_API_KEY` header (internal only).
+
+### RAG query
+
+`/api/knowledge/query` embeds the question, runs a pgvector cosine similarity search (`<=>` operator) to find top-5 chunks, builds a context prompt, calls `geminiGenerate`, and returns `{ answer, sources }`. The test Q&A panel in the knowledge UI calls this route via the `testQuery` server action.
+
+### Learn from conversation
+
+`learnFromConversation(conversationId)` in `inbox/actions.ts` fetches the full message transcript, sends it to `geminiGenerate` with a FAQ extraction prompt, inserts a `knowledge_source` of type `"conversation"`, and fires background ingestion. Visible as a "Learn" button on resolved conversations in the inbox thread header.
 
 ## Agent Instructions For Future Work
 
