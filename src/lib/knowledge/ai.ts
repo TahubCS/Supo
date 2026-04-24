@@ -121,6 +121,26 @@ export async function geminiEmbedMany(texts: string[], productId: string): Promi
   return result;
 }
 
+// Probes the generation model chain once and caches the first working model for
+// 10 minutes. Used by the chat streaming route, which can't fall back mid-stream.
+let generationModelCache: { id: string; expiresAt: number } | null = null;
+
+export async function resolveGenerationModel(): Promise<string> {
+  if (generationModelCache && Date.now() < generationModelCache.expiresAt) {
+    return generationModelCache.id;
+  }
+  for (const modelId of GENERATION_MODELS) {
+    try {
+      await generateText({ model: google(modelId), prompt: "hi", maxOutputTokens: 1 });
+      generationModelCache = { id: modelId, expiresAt: Date.now() + 10 * 60 * 1000 };
+      return modelId;
+    } catch {
+      // try next
+    }
+  }
+  throw new Error("No generation models available");
+}
+
 export async function geminiGenerate(prompt: string, systemPrompt: string): Promise<string> {
   const errors: string[] = [];
   for (const modelId of GENERATION_MODELS) {

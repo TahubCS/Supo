@@ -219,6 +219,7 @@ src/app/
     verify-email/page.tsx
   api/
     auth/[...all]/route.ts
+    chat/route.ts                         ← POST: public widget chat (streaming); CORS open; no auth — productId only
     knowledge/
       ingest/route.ts                     ← POST: background ingestion (maxDuration=300); auth via x-api-key
       query/route.ts                      ← POST: RAG query (embed → pgvector search → generate)
@@ -529,11 +530,15 @@ All calls go through `geminiGenerate(prompt, systemPrompt)` — do not call the 
 
 One embedding model is assigned per product and stored in `product.embedding_model`. It is set on the first ingest call and **never changed** — mixing models within a product corrupts vector space and breaks retrieval.
 
-- Current model: `gemini-embedding-001` (768-dim natively, hnsw-indexable)
-- `gemini-embedding-002` is excluded: @ai-sdk/google v3 does not expose `outputDimensionality` in TypeScript types, so its 3072-dim output cannot be safely dimensioned to fit pgvector's 2000-dim index limit.
+- Both available models (`gemini-embedding-2-preview`, `gemini-embedding-001`) default to **3072 dims**. We pin to **768 dims** via `outputDimensionality: 768` so vectors fit the `vector(768)` schema column and stay within pgvector's 2000-dim HNSW index limit.
+- Preferred model: `gemini-embedding-2-preview` — officially supports `outputDimensionality` (custom dimensions).
+- Fallback model: `gemini-embedding-001` — does not officially support custom dimensions; only used if the preview model is unavailable.
 - `text-embedding-004` is discontinued — do not use it.
-- `resolveEmbeddingModel(productId)` checks the DB first (fast path), probes models only on first call.
-- All embedding calls go through `geminiEmbed` / `geminiEmbedMany` — never call `google.textEmbeddingModel()` directly.
+- `resolveEmbeddingModel(productId)` checks an in-memory cache first, then the DB, then probes models on first call. The probe uses `outputDimensionality: 768` to confirm the model can emit the target dimension.
+- All embedding calls go through `geminiEmbed` / `geminiEmbedMany` — never call `google.embedding()` directly elsewhere.
+- `geminiEmbed` uses `taskType: "RETRIEVAL_QUERY"` — optimized for matching against stored chunks.
+- `geminiEmbedMany` uses `taskType: "RETRIEVAL_DOCUMENT"` — optimized for being retrieved by queries.
+- Changing `EMBED_DIMENSIONS` requires a schema migration and full re-index of all products.
 
 ### Ingestion pipeline
 
@@ -555,6 +560,53 @@ Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return
 ### Learn from conversation
 
 `learnFromConversation(conversationId)` in `inbox/actions.ts` fetches the full message transcript, sends it to `geminiGenerate` with a FAQ extraction prompt, inserts a `knowledge_source` of type `"conversation"`, and fires background ingestion. Visible as a "Learn" button on resolved conversations in the inbox thread header.
+
+## Chat API
+
+### Endpoint
+
+`POST /api/chat` — public, CORS fully open (`Access-Control-Allow-Origin: *`). Called by the embedded widget JS from any customer domain.
+
+### Request
+
+```json
+{
+  "productId": "...",
+  "message": "How do I reset my password?",
+  "conversationId": "...",
+  "customer": { "name": "Jane Smith", "email": "jane@example.com" }
+}
+```
+
+`conversationId` is omitted on the first message of a new session. The widget reads it from the `x-conversation-id` response header and passes it on all subsequent turns.
+
+### Response
+
+- **Body**: plain text stream (`text/plain`) — the AI reply streaming token by token. Consumed by the widget with a `ReadableStream` reader.
+- **`x-conversation-id`** header: UUID of the conversation (new or existing). Widget stores this in session storage.
+- **`x-sources`** header (optional): JSON array of `{ name, url }` objects when knowledge-base chunks were used. Widget may display source attribution.
+
+### Flow
+
+1. Validate required fields → 400 if missing.
+2. Load product + widget config (bot name, greeting). → 404 if product not found.
+3. Upsert customer by `email + organizationId` (email normalized to lowercase).
+4. Get or create conversation. If `conversationId` is provided, verify it belongs to this product + customer. Re-open resolved/snoozed conversations when the customer messages again.
+5. Insert the customer message.
+6. Load last 20 messages for multi-turn context.
+7. RAG: `geminiEmbed(message)` → pgvector cosine search → top-5 chunks with similarity ≥ 0.4. Silently skips if KB is empty or unavailable.
+8. Build system prompt: bot name + product description + KB context (with citation numbers) + behaviour rules.
+9. `resolveGenerationModel()` → cached working model (10-min TTL, probed via `generateText` on cold start).
+10. `streamText(model, system, messages)` → stream to client via `toTextStreamResponse()`.
+11. `onFinish` callback inserts the AI message and updates `conversation.lastMessageAt`.
+
+### Key decisions
+
+- **No authentication**: productId is the only identifier. Add rate limiting (Upstash) when abuse becomes a concern.
+- **Streaming over non-streaming**: `streamText` + `toTextStreamResponse()` gives plain text — simplest for a vanilla JS widget to consume without the AI SDK on the client.
+- **Model selection**: `resolveGenerationModel()` probes the 9-model chain once per 10 minutes and caches the result. `streamText` can't fall back mid-stream, so the probe up-front is necessary.
+- **Customer email normalization**: stored and looked up as lowercase to prevent duplicate customer records.
+- **Conversation re-open**: a customer message on a resolved/snoozed conversation automatically re-opens it.
 
 ## Agent Instructions For Future Work
 
