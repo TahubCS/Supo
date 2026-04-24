@@ -125,8 +125,14 @@ This is the workspace management surface.
 - Current shared DB entrypoint is `src/db/index.ts`
 - Current Drizzle schema entrypoint is `src/db/schema.ts`
 - Current Drizzle config file is `drizzle.config.ts`
-- Current tables in `src/db/schema.ts` are the Better Auth core (`user`, `session`, `account`, `verification`) plus the organization plugin (`organization`, `member`, `invitation`). There are no app-owned tables yet.
+- Current tables in `src/db/schema.ts`:
+  - Better Auth core: `user`, `session`, `account`, `verification`
+  - Organization plugin: `organization`, `member`, `invitation`
+  - App-owned: `product`, `widget_config`
+- `product` is the first app-owned table. It belongs to an `organization` and is the unit around which knowledge, conversations, widget config, and analytics are scoped.
+- `widget_config` is scoped to `product_id` (one-to-one), not `organization_id`. Do not revert this — widget config is per-product, not per-workspace.
 - The `organization` table is the tenant anchor. Do not reintroduce a separate `workspaces` table — the earlier placeholder was dropped on purpose.
+- Drizzle `experimental.joins: true` is enabled in `src/db/index.ts` for relational query performance.
 
 ### ORM
 
@@ -147,7 +153,12 @@ This is the workspace management surface.
 - The `organization` plugin is enabled on both server (`organization()`) and client (`organizationClient()`) — this is how Supo represents tenants, teams, roles, and invitations. Do not rebuild membership/invitation tables by hand.
 - `trustedOrigins` is set to `[BETTER_AUTH_URL, "http://localhost:3000"]`. Any new deployed host must be added to this list.
 - Current Better Auth Infrastructure integration uses the `dash()` plugin.
-- Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
+- `appName: "Supo"` is set in the auth config.
+- `advanced.ipAddress.ipAddressHeaders: ["x-vercel-forwarded-for", "x-forwarded-for"]` is set for correct IP detection on Vercel.
+- `experimental.joins: true` is enabled for relational query performance.
+- `requireEmailVerification: false` is currently set — email verification flow is fully implemented with Resend but deliberately disabled until a verified sending domain is configured. Flip this to `true` and add the domain to re-enable it.
+- Transactional email (verification, password reset) uses `Resend` via `onboarding@resend.dev`. This sender only delivers to the Resend account owner's email without a verified domain. The `RESEND_API_KEY` env var is required.
+- Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
 
 ### Storage
 
@@ -160,22 +171,99 @@ This is the workspace management surface.
 
 ## App Structure
 
-Prefer this structure as the product grows:
+### Current live structure
 
-- `src/app/(marketing)` for public pages
-- `src/app/(app)` for authenticated product pages
-- `src/app/api` for route handlers and backend entrypoints
-- `src/db` for database connection and schema files
-- `src/components/theme-provider.tsx` for the global theme provider
-- `src/components/ThemeToggle.tsx` for the shared theme switcher
+```
+src/app/
+  layout.tsx                            ← root layout: ThemeProvider, metadata
+  page.tsx                              ← marketing landing page
+  (app)/
+    layout.tsx                          ← auth check only — redirects to /sign-in if no session
+    (workspace)/
+      layout.tsx                        ← org check + WorkspaceSidebar; shows CreateWorkspaceForm if no org
+      dashboard/
+        page.tsx                        ← products list + "Add product" dialog
+        actions.ts                      ← createProduct server action
+        NewProductDialog.tsx            ← client dialog for creating a product
+      settings/
+        page.tsx                        ← workspace settings (account, team, billing)
+    products/
+      [id]/
+        layout.tsx                      ← verifies product ownership + ProductSidebar
+        widget/
+          page.tsx                      ← widget configurator server shell
+          WidgetConfigurator.tsx        ← full client configurator (live preview + embed code)
+          actions.ts                    ← saveWidgetConfig server action (scoped to productId)
+        inbox/
+          page.tsx                        ← server component: fetches conversations + latest messages, renders InboxView
+          InboxView.tsx                   ← client orchestrator: selectedId state, two-panel flex layout
+          ConversationList.tsx            ← left panel (w-80): search, All/Open/Resolved tabs, conversation items
+          ConversationThread.tsx          ← right panel: sticky header, message bubbles, reply composer
+          actions.ts                      ← getMessages, resolveConversation, snoozeConversation, reopenConversation, sendMessage
+          types.ts                        ← ConversationWithDetails type shared across inbox components
+        knowledge/page.tsx
+        analytics/page.tsx
+  (auth)/
+    layout.tsx
+    sign-in/page.tsx
+    sign-up/page.tsx
+    sign-up/team/page.tsx
+    forgot-password/page.tsx
+    reset-password/page.tsx
+    verify-email/page.tsx
+  api/
+    auth/[...all]/route.ts
+
+src/components/
+  WorkspaceSidebar.tsx                  ← workspace-level nav (Products, Settings, user/sign-out)
+  ProductSidebar.tsx                    ← product-level nav (← All products, Inbox, Knowledge, Widget, Analytics)
+  CreateWorkspaceForm.tsx               ← client form for creating the first org
+  theme-provider.tsx
+  ThemeToggle.tsx
+  ui/                                   ← shadcn primitives
+
+src/db/
+  index.ts                              ← drizzle instance with schema
+  schema.ts                             ← all table definitions and relations
+
+src/lib/
+  auth.ts                               ← Better Auth server config
+  auth-client.ts                        ← Better Auth browser client
+  env.ts                                ← validated env vars
+  slug.ts                               ← org slug generator
+
+src/styles/
+  theme.css                             ← global tokens, scroll-behavior: smooth on html
+  index.css                             ← Tailwind entry
+```
+
+### Route layout nesting
+
+- `(app)/layout.tsx` — auth guard only. Renders `{children}` directly.
+- `(app)/(workspace)/layout.tsx` — org guard + `WorkspaceSidebar`. Wraps `/dashboard` and `/settings`.
+- `(app)/products/[id]/layout.tsx` — product ownership guard + `ProductSidebar`. Wraps all per-product pages.
+- These three layouts never share a sidebar: workspace routes get `WorkspaceSidebar`, product routes get `ProductSidebar`.
+
+### Sidebar components
+
+- `WorkspaceSidebar` — shows org name, "Products" link to `/dashboard`, "Settings" link, user/sign-out row.
+- `ProductSidebar` — shows "← All products" back link, product name, per-product nav (Inbox, Knowledge, Widget, Analytics), user/sign-out row.
+- Both are client components using `usePathname()` for active states.
+- Neither sidebar is shared; do not merge them.
+
+### Scroll behavior
+
+- `scroll-behavior: smooth` is set on `html` in `src/styles/theme.css` — applies globally to all pages including the landing page.
+- `data-scroll-behavior="smooth"` is set on the `<html>` element in `src/app/layout.tsx` — tells Next.js to preserve smooth scroll during client-side navigation.
+- Sidebar layout `<main>` elements use `scroll-smooth` — ensures anchor links inside overflow-scroll containers also animate smoothly.
+
+### Aspirational structure (add as features ship)
+
 - `src/features/widget`
 - `src/features/ai`
 - `src/features/support-core`
 - `src/features/agent-workspace`
 - `src/features/admin`
-- `src/components/ui` for reusable base UI primitives
-- `src/components` only for shared composed components that are truly cross-feature
-- `src/lib` for low-level utilities and integrations only
 
 ## Component Reuse Rules
 
@@ -231,24 +319,38 @@ The Better Auth tables live in `src/db/schema.ts` and are the source of truth fo
 - `member` — user-in-organization with role
 - `invitation` — pending invites to an organization
 
-At minimum, the product architecture should support these additional app-owned entities (to be added as Drizzle tables with `organization_id` tenancy columns as each feature ships):
+App-owned tables currently in `src/db/schema.ts`:
 
-- customers
-- conversations
-- conversation_participants
-- messages
-- tickets
-- ticket_assignments
-- tags
-- conversation_tags
-- knowledge_sources
-- knowledge_documents
-- automations
-- events
+- `product` — a product owned by an `organization`. All per-product features (widget, inbox, knowledge, analytics) are scoped under a product. Columns: `id`, `organization_id`, `name`, `description`, `category`, `url`, `created_at`, `updated_at`.
+- `widget_config` — one-to-one with `product` via `product_id`. Stores bot name, greeting, position, theme, accent color. The `product_id` column has a UNIQUE constraint enforcing the 1:1 relationship.
+- `customer` — org-scoped. Represents the end-user who initiates support conversations. Columns: `id`, `organization_id`, `name`, `email`, `created_at`.
+- `conversation` — product-scoped. A support thread between a customer and the product's support surface. Columns: `id`, `product_id`, `customer_id`, `status` (open/resolved/snoozed), `assignee_id`, `ai_handled`, `subject`, `last_message_at`, `created_at`, `updated_at`.
+- `message` — conversation-scoped. Individual messages within a conversation. Columns: `id`, `conversation_id`, `body`, `sender_type` (customer/ai/agent), `sender_id`, `created_at`.
 
-Every app-owned table above must:
-- Include `organization_id text not null references organization(id) on delete cascade`.
-- Use `text` primary keys with Better Auth's ID generator when the row can be owned by a user/organization, for consistency with the auth tables.
+### Tenancy model
+
+There are two tenancy scopes in the product:
+
+1. **Workspace-scoped** (org-level): tables that belong directly to `organization`. Use `organization_id text not null references organization(id) on delete cascade`. Examples: `product`, future `team_settings`.
+2. **Product-scoped**: tables that belong to a `product`. Use `product_id text not null references product(id) on delete cascade`. Examples: `widget_config`, future `knowledge_sources`, `conversations`, `messages`.
+
+Do not attach product-scoped data directly to `organization_id` — it must go through the `product` table.
+
+### Remaining entities to add as features ship
+
+- `conversation_participants` (product-scoped)
+- `tickets` (product-scoped)
+- `ticket_assignments` (product-scoped)
+- `tags` (product-scoped)
+- `conversation_tags` (product-scoped)
+- `knowledge_sources` (product-scoped)
+- `knowledge_documents` (product-scoped)
+- `automations` (product-scoped)
+- `events` (product-scoped)
+
+Every app-owned table must:
+- Use `text` primary keys with `crypto.randomUUID()` for consistency with the auth tables.
+- Include the appropriate tenancy FK (`organization_id` or `product_id`) with `on delete cascade`.
 - Not duplicate the role/membership concepts already provided by the organization plugin.
 
 ## Migration and Database Rules
@@ -262,6 +364,8 @@ Every app-owned table above must:
 - Prefer code-first schema evolution for this project because the database is new.
 - When schema files change, generate and apply migrations in the same body of work when feasible.
 - If the database layer changes materially, update `AGENTS.md` to reflect the new source-of-truth files and commands.
+- `bun run db:generate` requires a TTY to resolve column rename conflicts interactively. If running in a non-TTY environment (CI, agent shells), write the migration SQL and snapshot manually and record the hash in `drizzle.__drizzle_migrations` after applying it.
+- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables).
 
 ## Theme Rules
 
@@ -411,4 +515,8 @@ When porting new sections or building dashboard screens, read these files as the
 - Keep `AGENTS.md` updated when theme architecture, landing-page structure, or frontend source-of-truth files change.
 - Whenever the architecture, stack decisions, product boundaries, or engineering rules change, update `AGENTS.md` in the same body of work so the file stays current.
 - When a design is provided from Figma or another export, integrate the UI into the current app architecture instead of replacing working auth, DB, routing, or theme infrastructure wholesale.
-    
+- New product-scoped features (inbox, knowledge, conversations, analytics) go under `src/app/(app)/products/[id]/`. They get the `ProductSidebar` automatically from `products/[id]/layout.tsx`.
+- New workspace-scoped features go under `src/app/(app)/(workspace)/`. They get the `WorkspaceSidebar` automatically from `(workspace)/layout.tsx`.
+- Do not add a new sidebar component — extend `WorkspaceSidebar` or `ProductSidebar` instead.
+- `embed code` in `WidgetConfigurator` uses `productId` (not `workspaceId` or `orgId`) as the identifier sent to `window.SupoSettings`. Any future widget loader must read `productId`.
+
