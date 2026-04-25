@@ -24,10 +24,12 @@ export default function TeamSignUpPage() {
     setError(null);
     setPending(true);
 
+    const callbackURL = `/dashboard?teamName=${encodeURIComponent(teamName)}`;
     const { error: signUpError } = await authClient.signUp.email({
       name,
       email,
       password,
+      callbackURL,
     });
 
     if (signUpError) {
@@ -36,8 +38,7 @@ export default function TeamSignUpPage() {
       return;
     }
 
-    router.push(`/dashboard?teamName=${encodeURIComponent(teamName)}`);
-    router.refresh();
+    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
   };
 
   return (

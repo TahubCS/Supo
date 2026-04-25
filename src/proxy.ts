@@ -48,6 +48,11 @@ const limiters = redis
         limiter: Ratelimit.fixedWindow(3, "60 m"),
         prefix: "rl:auth:forgot-pw",
       }),
+      verifyEmail: new Ratelimit({
+        redis,
+        limiter: Ratelimit.fixedWindow(5, "60 m"),
+        prefix: "rl:auth:verify-email",
+      }),
     }
   : null;
 
@@ -116,6 +121,7 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
       "/api/auth/sign-in/email": limiters.signIn,
       "/api/auth/sign-up/email": limiters.signUp,
       "/api/auth/request-password-reset": limiters.forgotPw,
+      "/api/auth/send-verification-email": limiters.verifyEmail,
     };
 
     const limiter = limiterMap[path];
@@ -149,5 +155,6 @@ export const config = {
     "/api/auth/sign-in/email",
     "/api/auth/sign-up/email",
     "/api/auth/request-password-reset",
+    "/api/auth/send-verification-email",
   ],
 };

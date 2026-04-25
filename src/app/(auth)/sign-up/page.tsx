@@ -27,6 +27,7 @@ export default function SignUpPage() {
       name,
       email,
       password,
+      callbackURL: "/dashboard",
     });
 
     if (signUpError) {
@@ -35,8 +36,7 @@ export default function SignUpPage() {
       return;
     }
 
-    router.push("/dashboard");
-    router.refresh();
+    router.push(`/verify-email?email=${encodeURIComponent(email)}`);
   };
 
   return (
