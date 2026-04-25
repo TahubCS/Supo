@@ -36,6 +36,13 @@
       "when": 1745568000000,
       "tag": "0004_knowledge_base",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1745654400000,
+      "tag": "0005_auto_sync",
+      "breakpoints": true
     }
   ]
 }
