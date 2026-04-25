@@ -13,6 +13,11 @@ import {
 import { env } from "@/lib/env";
 import { geminiEmbed, resolveGenerationModel } from "@/lib/knowledge/ai";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
+import {
+  isSecurityQuotaError,
+  requireSecurityQuota,
+  safeQuotaKey,
+} from "@/lib/security";
 
 export const maxDuration = 60;
 
@@ -22,6 +27,12 @@ const CORS: HeadersInit = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
+// Cap widget messages to limit abuse and keep prompt size bounded.
+const MAX_WIDGET_MESSAGE_LENGTH = 2000;
+// Keep customer names within a practical UI/storage bound while allowing typical full names.
+const MAX_WIDGET_CUSTOMER_NAME_LENGTH = 120;
+// 254 is the commonly accepted maximum total length for an email address.
+const MAX_WIDGET_CUSTOMER_EMAIL_LENGTH = 254;
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS });
@@ -62,6 +73,48 @@ type ChatRequest = {
   customer: { name: string; email: string };
 };
 
+function quotaErrorResponse(error: unknown) {
+  if (!isSecurityQuotaError(error)) return null;
+  const headers = new Headers(CORS);
+  headers.set("Content-Type", "application/json");
+  if (error.retryAfter) {
+    headers.set("Retry-After", String(error.retryAfter));
+  }
+
+  return NextResponse.json({ error: error.message }, { status: error.status, headers });
+}
+
+function isValidCustomerEmail(email: string): boolean {
+  if (email.length > MAX_WIDGET_CUSTOMER_EMAIL_LENGTH || email.includes("..")) {
+    return false;
+  }
+
+  const parts = email.split("@");
+  if (parts.length !== 2) return false;
+
+  const [local, domain] = parts;
+  if (!local || !domain || local.length > 64 || !/^[^\s@]+$/.test(local)) {
+    return false;
+  }
+
+  const labels = domain.split(".");
+  if (labels.length < 2) return false;
+
+  const topLevelDomain = labels.at(-1);
+  if (!topLevelDomain || topLevelDomain.length < 2 || !/^[a-z]+$/i.test(topLevelDomain)) {
+    return false;
+  }
+
+  return labels.every(
+    (label) =>
+      label.length > 0 &&
+      label.length <= 63 &&
+      /^[a-z0-9-]+$/i.test(label) &&
+      !label.startsWith("-") &&
+      !label.endsWith("-"),
+  );
+}
+
 export async function POST(req: NextRequest) {
   let body: ChatRequest;
   try {
@@ -71,12 +124,27 @@ export async function POST(req: NextRequest) {
   }
 
   const { productId, message: userMessage, conversationId, customer: customerInfo } = body;
+  const trimmedMessage = userMessage?.trim() ?? "";
+  const customerName = customerInfo?.name?.trim() ?? "";
+  const customerEmail = customerInfo?.email?.trim().toLowerCase() ?? "";
 
-  if (!productId || !userMessage?.trim() || !customerInfo?.email || !customerInfo?.name) {
+  if (!productId || !trimmedMessage || !customerEmail || !customerName) {
     return NextResponse.json(
       { error: "productId, message, customer.name, and customer.email are required" },
       { status: 400, headers: CORS },
     );
+  }
+
+  if (
+    trimmedMessage.length > MAX_WIDGET_MESSAGE_LENGTH ||
+    customerName.length > MAX_WIDGET_CUSTOMER_NAME_LENGTH ||
+    customerEmail.length > MAX_WIDGET_CUSTOMER_EMAIL_LENGTH
+  ) {
+    return NextResponse.json({ error: "Input is too long." }, { status: 400, headers: CORS });
+  }
+
+  if (!isValidCustomerEmail(customerEmail)) {
+    return NextResponse.json({ error: "Valid customer.email is required" }, { status: 400, headers: CORS });
   }
 
   // ── Product + widget config ──────────────────────────────────────────────
@@ -88,6 +156,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
 
+  try {
+    const event = {
+      organizationId: foundProduct.organizationId,
+      productId,
+      headerList: req.headers,
+      path: "/api/chat",
+      method: "POST",
+    };
+    await requireSecurityQuota("chat.product.hour", productId, event);
+    await requireSecurityQuota("chat.product.day", productId, event);
+    await requireSecurityQuota("chat.customer.hour", `${productId}:${customerEmail}`, {
+      ...event,
+      metadata: { customerEmail: safeQuotaKey(customerEmail) },
+    });
+    await requireSecurityQuota("chat.customer.day", `${productId}:${customerEmail}`, {
+      ...event,
+      metadata: { customerEmail: safeQuotaKey(customerEmail) },
+    });
+  } catch (error) {
+    const response = quotaErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
+
   const config = foundProduct.widgetConfigs[0] ?? null;
   const botName = config?.botName ?? "Support";
 
@@ -95,7 +187,7 @@ export async function POST(req: NextRequest) {
   let cust = await db.query.customer.findFirst({
     where: and(
       eq(customer.organizationId, foundProduct.organizationId),
-      eq(customer.email, customerInfo.email.toLowerCase()),
+      eq(customer.email, customerEmail),
     ),
   });
 
@@ -106,15 +198,15 @@ export async function POST(req: NextRequest) {
     await db.insert(customer).values({
       id: custId,
       organizationId: foundProduct.organizationId,
-      name: customerInfo.name,
-      email: customerInfo.email.toLowerCase(),
+      name: customerName,
+      email: customerEmail,
       createdAt: now,
     });
     cust = {
       id: custId,
       organizationId: foundProduct.organizationId,
-      name: customerInfo.name,
-      email: customerInfo.email.toLowerCase(),
+      name: customerName,
+      email: customerEmail,
       createdAt: now,
     };
   }
@@ -138,7 +230,7 @@ export async function POST(req: NextRequest) {
       customerId: cust.id,
       status: "open",
       aiHandled: true,
-      subject: userMessage.trim().slice(0, 80),
+      subject: trimmedMessage.slice(0, 80),
       lastMessageAt: now,
       createdAt: now,
       updatedAt: now,
@@ -150,7 +242,7 @@ export async function POST(req: NextRequest) {
       status: "open",
       assigneeId: null,
       aiHandled: true,
-      subject: userMessage.trim().slice(0, 80),
+      subject: trimmedMessage.slice(0, 80),
       lastMessageAt: now,
       createdAt: now,
       updatedAt: now,
@@ -164,10 +256,25 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Save customer message ────────────────────────────────────────────────
+  try {
+    await requireSecurityQuota("chat.conversation.minute", conv.id, {
+      organizationId: foundProduct.organizationId,
+      productId,
+      headerList: req.headers,
+      path: "/api/chat",
+      method: "POST",
+      metadata: { conversationId: conv.id },
+    });
+  } catch (error) {
+    const response = quotaErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
+
   await db.insert(message).values({
     id: crypto.randomUUID(),
     conversationId: conv.id,
-    body: userMessage.trim(),
+    body: trimmedMessage,
     senderType: "customer",
     senderId: null,
     createdAt: now,
@@ -194,7 +301,7 @@ export async function POST(req: NextRequest) {
   let foundRelevantKnowledge = false;
 
   try {
-    const queryEmbedding = await geminiEmbed(userMessage, productId);
+    const queryEmbedding = await geminiEmbed(trimmedMessage, productId);
     const vectorStr = `[${queryEmbedding.join(",")}]`;
 
     const results = await db.execute(
@@ -228,7 +335,7 @@ export async function POST(req: NextRequest) {
   if (!foundRelevantKnowledge) {
     createMissingKnowledgeSuggestion({
       productId,
-      question: userMessage,
+      question: trimmedMessage,
       sourceConversationId: conv.id,
       reason:
         "A customer asked this in the widget, but no indexed knowledge matched above the retrieval threshold.",

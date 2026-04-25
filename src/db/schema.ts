@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -103,6 +103,7 @@ export const userRelations = relations(user, ({ many }) => ({
   assignedConversations: many(conversation),
   sentMessages: many(message),
   reviewedKnowledgeSuggestions: many(knowledgeSuggestion),
+  securityEvents: many(securityEvent),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -156,6 +157,7 @@ export const organizationRelations = relations(organization, ({ many }) => ({
   invitations: many(invitation),
   products: many(product),
   customers: many(customer),
+  securityEvents: many(securityEvent),
 }));
 
 export const memberRelations = relations(member, ({ one }) => ({
@@ -197,6 +199,48 @@ export const productRelations = relations(product, ({ one, many }) => ({
   conversations: many(conversation),
   knowledgeSources: many(knowledgeSource),
   knowledgeSuggestions: many(knowledgeSuggestion),
+  securityEvents: many(securityEvent),
+}));
+
+export const securityEvent = pgTable(
+  "security_event",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    organizationId: text("organization_id").references(() => organization.id, {
+      onDelete: "set null",
+    }),
+    productId: text("product_id").references(() => product.id, { onDelete: "set null" }),
+    eventType: text("event_type").notNull(),
+    severity: text("severity").notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    path: text("path"),
+    method: text("method"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("security_event_created_idx").on(table.createdAt),
+    index("security_event_user_created_idx").on(table.userId, table.createdAt),
+    index("security_event_product_created_idx").on(table.productId, table.createdAt),
+    index("security_event_severity_created_idx").on(table.severity, table.createdAt),
+  ],
+);
+
+export const securityEventRelations = relations(securityEvent, ({ one }) => ({
+  user: one(user, {
+    fields: [securityEvent.userId],
+    references: [user.id],
+  }),
+  organization: one(organization, {
+    fields: [securityEvent.organizationId],
+    references: [organization.id],
+  }),
+  product: one(product, {
+    fields: [securityEvent.productId],
+    references: [product.id],
+  }),
 }));
 
 export const widgetConfig = pgTable("widget_config", {

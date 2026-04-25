@@ -70,6 +70,21 @@ type KnowledgeRow = {
   created_at: Date;
 };
 
+type SecurityEventRow = {
+  id: string;
+  event_type: string;
+  severity: string;
+  ip_address: string | null;
+  user_agent: string | null;
+  path: string | null;
+  method: string | null;
+  metadata: unknown;
+  created_at: Date;
+  user_email: string | null;
+  organization_name: string | null;
+  product_name: string | null;
+};
+
 function toNumber(value: string): number {
   return Number.parseInt(value, 10) || 0;
 }
@@ -77,8 +92,14 @@ function toNumber(value: string): number {
 export default async function AdminPage() {
   await requireSuperAdmin();
 
-  const [workspaceResult, userResult, productResult, conversationResult, knowledgeResult] =
-    await Promise.all([
+  const [
+    workspaceResult,
+    userResult,
+    productResult,
+    conversationResult,
+    knowledgeResult,
+    securityResult,
+  ] = await Promise.all([
     db.execute(sql`
       SELECT
         o.id,
@@ -188,6 +209,27 @@ export default async function AdminPage() {
       ORDER BY created_at DESC
       LIMIT ${ADMIN_SECTION_LIMIT}
     `),
+    db.execute(sql`
+      SELECT
+        se.id,
+        se.event_type,
+        se.severity,
+        se.ip_address,
+        se.user_agent,
+        se.path,
+        se.method,
+        se.metadata,
+        se.created_at,
+        u.email AS user_email,
+        o.name AS organization_name,
+        p.name AS product_name
+      FROM security_event se
+      LEFT JOIN "user" u ON u.id = se.user_id
+      LEFT JOIN organization o ON o.id = se.organization_id
+      LEFT JOIN product p ON p.id = se.product_id
+      ORDER BY se.created_at DESC
+      LIMIT ${ADMIN_SECTION_LIMIT}
+    `),
   ]);
 
   const workspaces = workspaceResult.rows as WorkspaceRow[];
@@ -195,6 +237,7 @@ export default async function AdminPage() {
   const products = productResult.rows as ProductRow[];
   const conversations = conversationResult.rows as ConversationRow[];
   const knowledgeItems = knowledgeResult.rows as KnowledgeRow[];
+  const securityEvents = securityResult.rows as SecurityEventRow[];
   const totals = workspaces.reduce(
     (acc, workspace) => ({
       workspaces: acc.workspaces + 1,
@@ -408,6 +451,52 @@ export default async function AdminPage() {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      <div className="mt-8 space-y-4">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Security activity</p>
+          <p className="text-xs text-[color:var(--text-secondary)]">
+            Latest quota, suspicious-session, and firewall events. Showing latest {ADMIN_SECTION_LIMIT}.
+          </p>
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
+          {securityEvents.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-[color:var(--text-secondary)]">
+              No security events logged yet.
+            </div>
+          ) : (
+            securityEvents.map((event) => (
+              <div key={event.id} className="border-b border-border px-4 py-3 last:border-b-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {event.event_type}
+                    </p>
+                    <p className="truncate text-xs text-[color:var(--text-secondary)]">
+                      {event.user_email ?? "No user"} /{" "}
+                      {event.organization_name ?? "No workspace"} /{" "}
+                      {event.product_name ?? "No product"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-[color:var(--text-secondary)]">
+                    {event.severity}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-[color:var(--text-tertiary)]">
+                  <span>{event.method ?? "method?"} {event.path ?? "path?"}</span>
+                  <span>IP: {event.ip_address ?? "unknown"}</span>
+                  <span>{new Date(event.created_at).toLocaleString()}</span>
+                </div>
+                {event.user_agent ? (
+                  <p className="mt-1 truncate text-xs text-[color:var(--text-tertiary)]">
+                    {event.user_agent}
+                  </p>
+                ) : null}
+              </div>
+            ))
+          )}
         </div>
       </div>
 

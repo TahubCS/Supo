@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { conversation, knowledgeSuggestion, member, message } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { geminiGenerate } from "@/lib/knowledge/ai";
+import { requireSecurityQuota } from "@/lib/security";
 
 type MessageRow = typeof message.$inferSelect;
 type SuggestionResult = "created" | "existing";
@@ -98,7 +99,16 @@ export async function sendMessage(
   conversationId: string,
   body: string,
 ): Promise<void> {
-  const { session } = await verifyConversationAccess(conversationId);
+  const { session, conv, membership } = await verifyConversationAccess(conversationId);
+  const headerList = await headers();
+  await requireSecurityQuota("inbox.agent.user.hour", session.user.id, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId: conv.productId,
+    headerList,
+    path: "/inbox/send-message",
+    method: "POST",
+  });
   const now = new Date();
 
   await db.insert(message).values({

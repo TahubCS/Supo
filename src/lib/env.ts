@@ -8,6 +8,11 @@ function requireEnv(name: string) {
   return value;
 }
 
+function optionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
 export const env = {
   DATABASE_URL: requireEnv("DATABASE_URL"),
   BETTER_AUTH_API_KEY: requireEnv("BETTER_AUTH_API_KEY"),
@@ -21,4 +26,5 @@ export const env = {
   GOOGLE_GEMINI_API_KEY: requireEnv("GOOGLE_GEMINI_API_KEY"),
   SUPO_SUPER_ADMIN_EMAILS: requireEnv("SUPO_SUPER_ADMIN_EMAILS"),
   BETTER_AUTH_ADMIN_USER_IDS: requireEnv("BETTER_AUTH_ADMIN_USER_IDS"),
+  SECURITY_ALERT_FROM_EMAIL: optionalEnv("SECURITY_ALERT_FROM_EMAIL"),
 };

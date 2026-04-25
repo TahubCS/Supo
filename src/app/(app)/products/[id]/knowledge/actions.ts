@@ -9,6 +9,7 @@ import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
+import { requireSecurityQuota } from "@/lib/security";
 
 async function verifyProductAccess(productId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -57,7 +58,25 @@ export type AddSourceInput = {
 };
 
 export async function addSource(productId: string, input: AddSourceInput): Promise<string> {
-  await verifyProductAccess(productId);
+  const { session, membership } = await verifyProductAccess(productId);
+  const headerList = await headers();
+
+  await requireSecurityQuota("knowledge.source.user.day", session.user.id, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId,
+    headerList,
+    path: "/knowledge/add-source",
+    method: "POST",
+  });
+  await requireSecurityQuota("knowledge.source.organization.day", membership.organizationId, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId,
+    headerList,
+    path: "/knowledge/add-source",
+    method: "POST",
+  });
 
   const sourceId = crypto.randomUUID();
   const now = new Date();
@@ -125,6 +144,23 @@ export async function reindexSource(sourceId: string): Promise<void> {
   if (!membership || membership.organizationId !== source.product.organizationId) {
     throw new Error("Not found");
   }
+  const headerList = await headers();
+  await requireSecurityQuota("knowledge.source.user.day", session.user.id, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId: source.product.id,
+    headerList,
+    path: "/knowledge/reindex-source",
+    method: "POST",
+  });
+  await requireSecurityQuota("knowledge.source.organization.day", membership.organizationId, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId: source.product.id,
+    headerList,
+    path: "/knowledge/reindex-source",
+    method: "POST",
+  });
 
   if (source.status !== "indexed") {
     await db
@@ -260,7 +296,25 @@ export type QueryResult = {
 };
 
 export async function testQuery(productId: string, question: string): Promise<QueryResult> {
-  await verifyProductAccess(productId);
+  const { session, membership } = await verifyProductAccess(productId);
+  const headerList = await headers();
+
+  await requireSecurityQuota("knowledge.test.user.hour", session.user.id, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId,
+    headerList,
+    path: "/knowledge/test-query",
+    method: "POST",
+  });
+  await requireSecurityQuota("knowledge.test.product.day", productId, {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId,
+    headerList,
+    path: "/knowledge/test-query",
+    method: "POST",
+  });
 
   const queryEmbedding = await geminiEmbed(question, productId);
   const vectorStr = `[${queryEmbedding.join(",")}]`;
