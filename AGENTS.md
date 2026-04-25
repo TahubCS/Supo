@@ -206,9 +206,10 @@ src/app/
           KnowledgeBase.tsx               ← client orchestrator: SuggestionList + SourceList + AddSourceDialog + TestQueryPanel
           SuggestionList.tsx              ← pending suggestion cards, detail dialog, approve/reject controls
           SourceList.tsx                  ← grid of source cards with status badges, re-index, delete
+          SuggestionList.tsx              ← pending FAQ/gap review cards with answer editor and approve/reject controls
           AddSourceDialog.tsx             ← dialog: Article / URL / GitHub segmented type selector
           TestQueryPanel.tsx              ← test Q&A: question input → RAG answer + source citations
-          actions.ts                      ← addSource, deleteSource, reindexSource, approveSuggestion, rejectSuggestion, testQuery
+          actions.ts                      ← addSource, deleteSource, reindexSource, approveSuggestion, rejectSuggestion, updateSuggestionAnswer, testQuery
         analytics/page.tsx
   (auth)/
     layout.tsx
@@ -247,6 +248,7 @@ src/lib/
   knowledge/
     ai.ts                               ← geminiEmbed, geminiEmbedMany, geminiGenerate (9-model fallback chain)
     ingest.ts                           ← chunkText, fetchUrl, fetchGitHub, ingestText, ingestSource
+    suggestions.ts                      ← missing-knowledge gap creation with 7-day exact-question dedupe
 
 src/styles/
   theme.css                             ← global tokens, scroll-behavior: smooth on html
@@ -343,7 +345,7 @@ App-owned tables currently in `src/db/schema.ts`:
 - `conversation` — product-scoped. A support thread between a customer and the product's support surface. Columns: `id`, `product_id`, `customer_id`, `status` (open/resolved/snoozed), `assignee_id`, `ai_handled`, `subject`, `last_message_at`, `created_at`, `updated_at`.
 - `message` — conversation-scoped. Individual messages within a conversation. Columns: `id`, `conversation_id`, `body`, `sender_type` (customer/ai/agent), `sender_id`, `created_at`.
 - `knowledge_source` — product-scoped. A single knowledge source. Columns: `id`, `product_id`, `type` (article/url/github/conversation/sitemap), `name`, `url`, `content`, `status` (pending/indexing/indexed/error), `error_message`, `chunk_count`, `content_hash` (SHA-256 of last fetched content for change detection), `last_checked_at` (last time content was fetched and compared by cron), `created_at`, `updated_at`. The `"sitemap"` type is auto-created when a product is created with a URL — it crawls multiple pages discovered via sitemap.xml.
-- `knowledge_suggestion` — product-scoped. Review queue for proposed KB updates generated from support conversations or future missing-knowledge detection. Columns: `id`, `product_id`, `source_conversation_id`, `approved_source_id`, `status` (pending/approved/rejected), `confidence`, `question`, `answer`, `content`, `reason`, `review_note`, `reviewed_by_id`, `reviewed_at`, `created_at`, `updated_at`. Approval creates and links a `knowledge_source`; rejection preserves the draft and audit state.
+- `knowledge_suggestion` — product-scoped. Review queue for proposed KB updates generated from support conversations and missing-knowledge detection. Columns: `id`, `product_id`, `source_conversation_id`, `approved_source_id`, `status` (pending/approved/rejected), `kind` (faq/gap), `confidence`, `question`, nullable `answer`, nullable `content`, `reason`, `review_note`, `reviewed_by_id`, `reviewed_at`, `created_at`, `updated_at`. FAQ suggestions must include real answer/content. Gap suggestions intentionally start without answer/content and cannot be approved until a reviewer saves a real answer. Approval creates and links a `knowledge_source`; rejection preserves the draft and audit state.
 - `knowledge_chunk` — source-scoped (denormalized `product_id` for fast search). Stores one text chunk with its pgvector embedding. Columns: `id`, `source_id`, `product_id`, `content`, `embedding` (vector(768)), `metadata` (JSON: title/url/chunkIndex), `created_at`. Has an HNSW index on `embedding` using cosine distance.
 
 ### Tenancy model
@@ -382,7 +384,7 @@ Every app-owned table must:
 - When schema files change, generate and apply migrations in the same body of work when feasible.
 - If the database layer changes materially, update `AGENTS.md` to reflect the new source-of-truth files and commands.
 - `bun run db:generate` requires a TTY to resolve column rename conflicts interactively. If running in a non-TTY environment (CI, agent shells), write the migration SQL and snapshot manually and record the hash in `drizzle.__drizzle_migrations` after applying it.
-- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue).
+- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue), `0007_knowledge_gap_suggestions` (gap kind + nullable answer/content for missing-knowledge review).
 
 ## Theme Rules
 
@@ -566,7 +568,7 @@ Build this in prompt-by-prompt slices, in this order, so the knowledge system be
 3. Implemented: pending suggestions are shown on the Knowledge page above Sources using `SuggestionList`, with confidence, reason, source conversation/customer metadata, and a detail dialog.
 4. Implemented: suggestions can be approved or rejected from the Knowledge page. Approval creates a `knowledge_source` of type `"conversation"`, links it through `approved_source_id`, marks the suggestion approved, and fires background ingestion. Rejection marks the suggestion rejected and preserves review metadata.
 5. Safe re-indexing is already implemented in `src/lib/knowledge/ingest.ts`: prepare replacement chunks first, commit the chunk swap in a transaction, and keep the previous indexed chunks usable on failure.
-6. Next: missing-knowledge detection. Do not implement this with placeholder answers; the current `knowledge_suggestion` schema requires real `answer` and `content`, so unanswered gap capture needs a separate schema plan first.
+6. Implemented: missing-knowledge detection creates pending `kind: "gap"` suggestions when widget chat or the Knowledge test panel finds no indexed chunks above the retrieval threshold. Gap suggestions store the real question with no placeholder answer/content, dedupe exact normalized questions for 7 days per product, and require a reviewer-saved answer before approval.
 
 ### Background ingestion pattern
 
@@ -582,7 +584,7 @@ Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return
 
 ### RAG query
 
-`/api/knowledge/query` embeds the question, runs a pgvector cosine similarity search (`<=>` operator) to find top-5 chunks, builds a context prompt, calls `geminiGenerate`, and returns `{ answer, sources }`. The test Q&A panel in the knowledge UI calls this route via the `testQuery` server action.
+`/api/knowledge/query` embeds the question, runs a pgvector cosine similarity search (`<=>` operator) to find top-5 chunks, builds a context prompt, calls `geminiGenerate`, and returns `{ answer, sources }`. The test Q&A panel in the knowledge UI calls the `testQuery` server action, which creates a pending `kind: "gap"` suggestion when no chunks meet the similarity threshold.
 
 ### Learn from conversation
 
@@ -621,7 +623,7 @@ Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return
 4. Get or create conversation. If `conversationId` is provided, verify it belongs to this product + customer. Re-open resolved/snoozed conversations when the customer messages again.
 5. Insert the customer message.
 6. Load last 20 messages for multi-turn context.
-7. RAG: `geminiEmbed(message)` → pgvector cosine search → top-5 chunks with similarity ≥ 0.4. Silently skips if KB is empty or unavailable.
+7. RAG: `geminiEmbed(message)` → pgvector cosine search → top-5 chunks with similarity ≥ 0.4. Silently skips if KB is empty or unavailable, and creates a pending missing-knowledge gap suggestion in the background when no relevant chunks are found.
 8. Build system prompt: bot name + product description + KB context (with citation numbers) + behaviour rules.
 9. `resolveGenerationModel()` → cached working model (10-min TTL, probed via `generateText` on cold start).
 10. `streamText(model, system, messages)` → stream to client via `toTextStreamResponse()`.
