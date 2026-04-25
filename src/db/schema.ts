@@ -109,6 +109,44 @@ export const sessionRelations = relations(session, ({ one }) => ({
   user: one(user, { fields: [session.userId], references: [user.id] }),
 }));
 
+export const adminAuditLog = pgTable(
+  "admin_audit_log",
+  {
+    id: text("id").primaryKey(),
+    adminUserId: text("admin_user_id")
+      .notNull()
+      .references(() => user.id),
+    targetUserId: text("target_user_id").references(() => user.id, { onDelete: "set null" }),
+    targetOrganizationId: text("target_organization_id").references(() => organization.id, {
+      onDelete: "set null",
+    }),
+    action: text("action").notNull(),
+    metadata: text("metadata"),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    index("admin_audit_log_admin_created_idx").on(table.adminUserId, table.createdAt),
+    index("admin_audit_log_target_user_idx").on(table.targetUserId),
+  ],
+);
+
+export const adminAuditLogRelations = relations(adminAuditLog, ({ one }) => ({
+  adminUser: one(user, {
+    fields: [adminAuditLog.adminUserId],
+    references: [user.id],
+  }),
+  targetUser: one(user, {
+    fields: [adminAuditLog.targetUserId],
+    references: [user.id],
+  }),
+  targetOrganization: one(organization, {
+    fields: [adminAuditLog.targetOrganizationId],
+    references: [organization.id],
+  }),
+}));
+
 export const accountRelations = relations(account, ({ one }) => ({
   user: one(user, { fields: [account.userId], references: [user.id] }),
 }));

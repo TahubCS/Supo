@@ -1,11 +1,12 @@
 import { dash } from "@better-auth/infra";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { createAccessControl } from "better-auth/plugins/access";
+import { defaultStatements } from "better-auth/plugins/admin/access";
 import { admin, organization } from "better-auth/plugins";
 import { Resend } from "resend";
 
 import { db } from "@/db";
-import { BETTER_AUTH_ADMIN_USER_IDS } from "@/lib/admin";
 import { env } from "@/lib/env";
 
 const resend = new Resend(env.RESEND_API_KEY);
@@ -13,6 +14,15 @@ const trustedOrigins =
   process.env.NODE_ENV === "production"
     ? [env.BETTER_AUTH_URL]
     : [env.BETTER_AUTH_URL, "http://localhost:3000"];
+const adminAc = createAccessControl(defaultStatements);
+const supoAdminRole = adminAc.newRole({
+  user: ["create", "list", "set-role", "ban", "set-password", "get", "update"],
+  session: ["list", "revoke", "delete"],
+});
+const supoUserRole = adminAc.newRole({
+  user: [],
+  session: [],
+});
 
 export const auth = betterAuth({
   appName: "Supo",
@@ -72,8 +82,11 @@ export const auth = betterAuth({
   },
   plugins: [
     admin({
-      adminUserIds: BETTER_AUTH_ADMIN_USER_IDS,
-      impersonationSessionDuration: 60 * 60,
+      ac: adminAc,
+      roles: {
+        admin: supoAdminRole,
+        user: supoUserRole,
+      },
     }),
     organization(),
     dash({

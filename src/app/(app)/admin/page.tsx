@@ -2,7 +2,12 @@ import { sql } from "drizzle-orm";
 import Link from "next/link";
 
 import { db } from "@/db";
+import { isSuperAdminUserId } from "@/lib/admin";
 import { requireSuperAdmin } from "@/lib/admin-server";
+
+import { AdminUserActions } from "./AdminUserActions";
+
+const ADMIN_SECTION_LIMIT = 50;
 
 type WorkspaceRow = {
   id: string;
@@ -112,6 +117,7 @@ export default async function AdminPage() {
       LEFT JOIN member m ON m.user_id = u.id
       GROUP BY u.id, u.name, u.email, u.email_verified, u.role, u.banned, u.ban_reason, u.created_at
       ORDER BY u.created_at DESC
+      LIMIT ${ADMIN_SECTION_LIMIT}
     `),
     db.execute(sql`
       SELECT
@@ -131,6 +137,7 @@ export default async function AdminPage() {
       LEFT JOIN knowledge_suggestion sugg ON sugg.product_id = p.id
       GROUP BY p.id, p.name, o.name, p.category, p.url, p.created_at
       ORDER BY p.created_at DESC
+      LIMIT ${ADMIN_SECTION_LIMIT}
     `),
     db.execute(sql`
       SELECT
@@ -150,6 +157,7 @@ export default async function AdminPage() {
       LEFT JOIN message msg ON msg.conversation_id = conv.id
       GROUP BY conv.id, conv.subject, conv.status, p.name, o.name, c.name, c.email, conv.last_message_at
       ORDER BY conv.last_message_at DESC
+      LIMIT ${ADMIN_SECTION_LIMIT}
     `),
     db.execute(sql`
       SELECT
@@ -178,6 +186,7 @@ export default async function AdminPage() {
       JOIN product p ON p.id = sugg.product_id
       JOIN organization o ON o.id = p.organization_id
       ORDER BY created_at DESC
+      LIMIT ${ADMIN_SECTION_LIMIT}
     `),
   ]);
 
@@ -296,7 +305,7 @@ export default async function AdminPage() {
         <div>
           <p className="text-sm font-semibold text-foreground">All users</p>
           <p className="text-xs text-[color:var(--text-secondary)]">
-            Better Auth accounts, verification, role, ban state, and workspace membership count.
+            Better Auth accounts, verification, role, ban state, workspace count, and guarded admin controls. Showing latest {ADMIN_SECTION_LIMIT}.
           </p>
         </div>
 
@@ -312,12 +321,23 @@ export default async function AdminPage() {
                   {account.email}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-3 text-xs text-[color:var(--text-tertiary)]">
-                <span>{account.role ?? "user"}</span>
-                <span>{account.banned ? "Banned" : "Active"}</span>
-                <span>{account.email_verified ? "Verified" : "Unverified"}</span>
-                <span>{account.workspace_count} workspace(s)</span>
-                <span>{new Date(account.created_at).toLocaleDateString()}</span>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 text-xs text-[color:var(--text-tertiary)]">
+                <div className="flex items-center gap-3">
+                  <span>{account.role ?? "user"}</span>
+                  <span>{account.banned ? "Banned" : "Active"}</span>
+                  <span>{account.email_verified ? "Verified" : "Unverified"}</span>
+                  <span>{account.workspace_count} workspace(s)</span>
+                  <span>{new Date(account.created_at).toLocaleDateString()}</span>
+                </div>
+                <AdminUserActions
+                  user={{
+                    id: account.id,
+                    name: account.name,
+                    email: account.email,
+                    banned: Boolean(account.banned),
+                    isSuperAdmin: isSuperAdminUserId(account.id),
+                  }}
+                />
               </div>
             </div>
           ))}
@@ -329,7 +349,7 @@ export default async function AdminPage() {
           <div>
             <p className="text-sm font-semibold text-foreground">All products</p>
             <p className="text-xs text-[color:var(--text-secondary)]">
-              Product-level footprint across every workspace.
+              Product-level footprint across every workspace. Showing latest {ADMIN_SECTION_LIMIT}.
             </p>
           </div>
           <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -360,7 +380,7 @@ export default async function AdminPage() {
           <div>
             <p className="text-sm font-semibold text-foreground">All conversations</p>
             <p className="text-xs text-[color:var(--text-secondary)]">
-              Latest support activity across every product.
+              Latest support activity across every product. Showing latest {ADMIN_SECTION_LIMIT}.
             </p>
           </div>
           <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -395,7 +415,7 @@ export default async function AdminPage() {
         <div>
           <p className="text-sm font-semibold text-foreground">Knowledge activity</p>
           <p className="text-xs text-[color:var(--text-secondary)]">
-            Sources and review suggestions across every product.
+            Sources and review suggestions across every product. Showing latest {ADMIN_SECTION_LIMIT}.
           </p>
         </div>
         <div className="overflow-hidden rounded-lg border border-border bg-card">
