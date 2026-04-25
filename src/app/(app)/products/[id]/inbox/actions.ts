@@ -190,6 +190,7 @@ The confidence should be an integer from 0 to 100.`;
     sourceConversationId: conversationId,
     approvedSourceId: null,
     status: "pending",
+    kind: "faq",
     confidence: clampConfidence(faq.confidence),
     question: faq.question,
     answer: faq.answer,

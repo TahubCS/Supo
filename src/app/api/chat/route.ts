@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { geminiEmbed, resolveGenerationModel } from "@/lib/knowledge/ai";
+import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
 
 export const maxDuration = 60;
 
@@ -190,6 +191,7 @@ export async function POST(req: NextRequest) {
   type SourceRow = { content: string; source_name: string; source_url: string | null };
   const sources: { name: string; url: string | null }[] = [];
   let ragContext = "";
+  let foundRelevantKnowledge = false;
 
   try {
     const queryEmbedding = await geminiEmbed(userMessage, productId);
@@ -209,6 +211,7 @@ export async function POST(req: NextRequest) {
 
     const chunks = results.rows as (SourceRow & { similarity: number })[];
     if (chunks.length > 0) {
+      foundRelevantKnowledge = true;
       ragContext = chunks
         .map((c, i) => `[${i + 1}] ${c.source_name}\n${c.content}`)
         .join("\n\n---\n\n");
@@ -220,6 +223,16 @@ export async function POST(req: NextRequest) {
     }
   } catch {
     // KB not set up yet — proceed without context
+  }
+
+  if (!foundRelevantKnowledge) {
+    createMissingKnowledgeSuggestion({
+      productId,
+      question: userMessage,
+      sourceConversationId: conv.id,
+      reason:
+        "A customer asked this in the widget, but no indexed knowledge matched above the retrieval threshold.",
+    }).catch(() => {});
   }
 
   // ── System prompt ────────────────────────────────────────────────────────

@@ -297,10 +297,11 @@ export const knowledgeSuggestion = pgTable(
       onDelete: "set null",
     }),
     status: text("status").notNull().default("pending"), // "pending" | "approved" | "rejected"
+    kind: text("kind").notNull().default("faq"), // "faq" | "gap"
     confidence: integer("confidence").notNull().default(0),
     question: text("question").notNull(),
-    answer: text("answer").notNull(),
-    content: text("content").notNull(),
+    answer: text("answer"),
+    content: text("content"),
     reason: text("reason"),
     reviewNote: text("review_note"),
     reviewedById: text("reviewed_by_id").references(() => user.id, { onDelete: "set null" }),

@@ -15,8 +15,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
-import { approveSuggestion, rejectSuggestion } from "./actions";
+import { approveSuggestion, rejectSuggestion, updateSuggestionAnswer } from "./actions";
 
 export type Suggestion = {
   id: string;
@@ -24,10 +25,11 @@ export type Suggestion = {
   sourceConversationId: string | null;
   approvedSourceId: string | null;
   status: string;
+  kind: string;
   confidence: number;
   question: string;
-  answer: string;
-  content: string;
+  answer: string | null;
+  content: string | null;
   reason: string | null;
   reviewNote: string | null;
   reviewedById: string | null;
@@ -62,9 +64,21 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
+  const [savedAnswer, setSavedAnswer] = useState(suggestion.answer ?? "");
+  const [answerDraft, setAnswerDraft] = useState(suggestion.answer ?? "");
   const customer = suggestion.sourceConversation?.customer;
+  const currentAnswer = savedAnswer || suggestion.answer || "";
+  const currentContent =
+    suggestion.content ?? (currentAnswer ? `**Q: ${suggestion.question}**\n\n${currentAnswer}` : null);
+  const isGap = suggestion.kind === "gap";
+  const canApprove = Boolean(currentAnswer.trim() && currentContent?.trim());
 
   function handleApprove() {
+    if (!canApprove) {
+      toast.error("Add an answer before approving this suggestion");
+      return;
+    }
+
     startTransition(async () => {
       try {
         await approveSuggestion(suggestion.id);
@@ -73,6 +87,20 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
         router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to approve suggestion");
+      }
+    });
+  }
+
+  function handleSaveAnswer() {
+    startTransition(async () => {
+      try {
+        const trimmed = answerDraft.trim();
+        await updateSuggestionAnswer(suggestion.id, trimmed);
+        setSavedAnswer(trimmed);
+        toast.success("Answer saved");
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to save answer");
       }
     });
   }
@@ -123,6 +151,12 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
         >
           {suggestion.status}
         </Badge>
+        <Badge
+          variant="outline"
+          className="h-5 rounded-full px-2 text-[10px] font-normal text-[color:var(--text-secondary)]"
+        >
+          {isGap ? "Missing answer" : "FAQ"}
+        </Badge>
       </div>
 
       <div className="flex items-center justify-between gap-2">
@@ -144,6 +178,12 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
                 <ConfidenceBadge value={suggestion.confidence} />
+                <Badge
+                  variant="outline"
+                  className="h-5 rounded-full px-2 text-[10px] font-normal text-[color:var(--text-secondary)]"
+                >
+                  {isGap ? "Missing answer" : "FAQ"}
+                </Badge>
                 {customer ? (
                   <span className="text-xs text-[color:var(--text-secondary)]">
                     From {customer.name} ({customer.email})
@@ -158,18 +198,48 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
 
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-[color:var(--text-secondary)]">Answer</p>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {suggestion.answer}
-                </p>
+                {isGap ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={answerDraft}
+                      onChange={(event) => setAnswerDraft(event.target.value)}
+                      placeholder="Write the answer that should be added to the knowledge base."
+                      className="min-h-28 text-sm"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isPending || !answerDraft.trim()}
+                        onClick={handleSaveAnswer}
+                        className="rounded-lg border-border text-xs text-[color:var(--text-secondary)] hover:border-[color:var(--text-secondary)] hover:text-foreground"
+                      >
+                        Save answer
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                    {currentAnswer}
+                  </p>
+                )}
               </div>
 
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-[color:var(--text-secondary)]">Content</p>
-                <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-[color:var(--card-elevated)] p-3">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {suggestion.content}
-                  </p>
-                </div>
+                {currentContent ? (
+                  <div className="max-h-56 overflow-y-auto rounded-lg border border-border bg-[color:var(--card-elevated)] p-3">
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      {currentContent}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-3">
+                    <p className="text-sm text-[color:var(--text-secondary)]">
+                      Add an answer to generate approvable knowledge content.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {suggestion.reason ? (
@@ -208,7 +278,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
                 </Button>
                 <Button
                   size="sm"
-                  disabled={isPending}
+                  disabled={isPending || !canApprove}
                   onClick={handleApprove}
                   className="gap-1.5 rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
                 >
@@ -234,9 +304,9 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
           <Button
             variant="ghost"
             size="icon"
-            disabled={isPending}
+            disabled={isPending || !canApprove}
             onClick={handleApprove}
-            title="Approve"
+            title={canApprove ? "Approve" : "Add an answer before approving"}
             className="size-7 rounded-md text-[color:var(--text-tertiary)] hover:text-foreground"
           >
             <Check className="size-3.5" />
@@ -254,7 +324,7 @@ export function SuggestionList({ suggestions }: { suggestions: Suggestion[] }) {
         <FileQuestion className="mb-3 size-6 text-[color:var(--text-tertiary)]" />
         <p className="text-sm font-medium text-foreground">No pending suggestions</p>
         <p className="mt-1 max-w-sm text-xs text-[color:var(--text-secondary)]">
-          Resolved conversations will appear here when Supo finds useful knowledge to review.
+          Resolved conversations and missing knowledge gaps will appear here for review.
         </p>
       </div>
     );

@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
@@ -8,6 +8,7 @@ import { knowledgeSource, knowledgeSuggestion, member, product } from "@/db/sche
 import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
+import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
 
 async function verifyProductAccess(productId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -152,6 +153,11 @@ export async function approveSuggestion(suggestionId: string): Promise<void> {
   const { session, suggestion } = await verifySuggestionAccess(suggestionId);
   if (suggestion.status !== "pending") throw new Error("Suggestion already reviewed");
 
+  const approvedContent = suggestion.content?.trim();
+  if (!suggestion.answer?.trim() || !approvedContent) {
+    throw new Error("Add an answer before approving this suggestion");
+  }
+
   const now = new Date();
   const sourceId = crypto.randomUUID();
 
@@ -162,14 +168,14 @@ export async function approveSuggestion(suggestionId: string): Promise<void> {
       type: "conversation",
       name: suggestion.question,
       url: null,
-      content: suggestion.content,
+      content: approvedContent,
       status: "indexing",
       chunkCount: 0,
       createdAt: now,
       updatedAt: now,
     });
 
-    await tx
+    const reviewed = await tx
       .update(knowledgeSuggestion)
       .set({
         status: "approved",
@@ -178,7 +184,12 @@ export async function approveSuggestion(suggestionId: string): Promise<void> {
         reviewedAt: now,
         updatedAt: now,
       })
-      .where(eq(knowledgeSuggestion.id, suggestionId));
+      .where(and(eq(knowledgeSuggestion.id, suggestionId), eq(knowledgeSuggestion.status, "pending")))
+      .returning({ id: knowledgeSuggestion.id });
+
+    if (reviewed.length === 0) {
+      throw new Error("Suggestion already reviewed");
+    }
   });
 
   fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
@@ -199,7 +210,7 @@ export async function rejectSuggestion(
   if (suggestion.status !== "pending") throw new Error("Suggestion already reviewed");
 
   const now = new Date();
-  await db
+  const reviewed = await db
     .update(knowledgeSuggestion)
     .set({
       status: "rejected",
@@ -208,7 +219,39 @@ export async function rejectSuggestion(
       reviewedAt: now,
       updatedAt: now,
     })
-    .where(eq(knowledgeSuggestion.id, suggestionId));
+    .where(and(eq(knowledgeSuggestion.id, suggestionId), eq(knowledgeSuggestion.status, "pending")))
+    .returning({ id: knowledgeSuggestion.id });
+
+  if (reviewed.length === 0) {
+    throw new Error("Suggestion already reviewed");
+  }
+}
+
+export async function updateSuggestionAnswer(
+  suggestionId: string,
+  answer: string,
+): Promise<void> {
+  const { suggestion } = await verifySuggestionAccess(suggestionId);
+  if (suggestion.status !== "pending") throw new Error("Suggestion already reviewed");
+  if (suggestion.kind !== "gap") throw new Error("Only missing-knowledge gaps can be edited here");
+
+  const trimmedAnswer = answer.trim();
+  if (!trimmedAnswer) throw new Error("Answer is required");
+
+  const now = new Date();
+  const updated = await db
+    .update(knowledgeSuggestion)
+    .set({
+      answer: trimmedAnswer,
+      content: `**Q: ${suggestion.question}**\n\n${trimmedAnswer}`,
+      updatedAt: now,
+    })
+    .where(and(eq(knowledgeSuggestion.id, suggestionId), eq(knowledgeSuggestion.status, "pending")))
+    .returning({ id: knowledgeSuggestion.id });
+
+  if (updated.length === 0) {
+    throw new Error("Suggestion already reviewed");
+  }
 }
 
 export type QueryResult = {
@@ -245,6 +288,17 @@ export async function testQuery(productId: string, question: string): Promise<Qu
   const chunks = (results.rows as ChunkRow[]).filter((c) => c.similarity >= MIN_SIMILARITY);
 
   if (chunks.length === 0) {
+    try {
+      await createMissingKnowledgeSuggestion({
+        productId,
+        question,
+        reason:
+          "An admin tested this question, but no indexed knowledge matched above the retrieval threshold.",
+      });
+    } catch {
+      // The test answer should still render if gap capture fails.
+    }
+
     return {
       answer: "No relevant content found in the knowledge base for that question.",
       sources: [],
