@@ -258,13 +258,15 @@ export const knowledgeSource = pgTable("knowledge_source", {
   productId: text("product_id")
     .notNull()
     .references(() => product.id, { onDelete: "cascade" }),
-  type: text("type").notNull(), // "article" | "url" | "github" | "conversation"
+  type: text("type").notNull(), // "article" | "url" | "github" | "conversation" | "sitemap"
   name: text("name").notNull(),
   url: text("url"),
   content: text("content"),
   status: text("status").notNull().default("pending"), // "pending" | "indexing" | "indexed" | "error"
   errorMessage: text("error_message"),
   chunkCount: integer("chunk_count").notNull().default(0),
+  contentHash: text("content_hash"),     // SHA-256 of last fetched content; set after each index
+  lastCheckedAt: timestamp("last_checked_at"), // last time content was fetched and compared
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });

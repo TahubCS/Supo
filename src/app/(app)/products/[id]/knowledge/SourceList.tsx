@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { BookOpen, FileText, Github, Globe, RefreshCw, Trash2 } from "lucide-react";
+import { BookOpen, FileText, Github, Globe, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 
@@ -17,11 +17,12 @@ type Source = {
   status: string;
   errorMessage: string | null;
   chunkCount: number;
+  lastCheckedAt: Date | null;
   updatedAt: Date;
 };
 
 function SourceIcon({ type }: { type: string }) {
-  if (type === "url") return <Globe className="size-4 text-[color:var(--text-secondary)]" />;
+  if (type === "url" || type === "sitemap") return <Globe className="size-4 text-[color:var(--text-secondary)]" />;
   if (type === "github") return <Github className="size-4 text-[color:var(--text-secondary)]" />;
   return <FileText className="size-4 text-[color:var(--text-secondary)]" />;
 }
@@ -80,9 +81,16 @@ function SourceCard({ source }: { source: Source }) {
           <SourceIcon type={source.type} />
           <span className="truncate text-sm font-medium text-foreground">{source.name}</span>
         </div>
-        <span className="shrink-0 rounded border border-border bg-[color:var(--card-elevated)] px-1.5 py-0.5 text-[10px] capitalize text-[color:var(--text-secondary)]">
-          {source.type}
-        </span>
+        {source.type === "sitemap" ? (
+          <span className="shrink-0 flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-500">
+            <RotateCcw className="size-2.5" />
+            Auto-sync
+          </span>
+        ) : (
+          <span className="shrink-0 rounded border border-border bg-[color:var(--card-elevated)] px-1.5 py-0.5 text-[10px] capitalize text-[color:var(--text-secondary)]">
+            {source.type}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -96,7 +104,9 @@ function SourceCard({ source }: { source: Source }) {
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-[color:var(--text-tertiary)]">
-          {formatDistanceToNow(source.updatedAt, { addSuffix: true })}
+          {source.lastCheckedAt
+            ? `Synced ${formatDistanceToNow(source.lastCheckedAt, { addSuffix: true })}`
+            : formatDistanceToNow(source.updatedAt, { addSuffix: true })}
         </span>
 
         <div className="flex items-center gap-1">

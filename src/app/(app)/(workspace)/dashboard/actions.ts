@@ -4,8 +4,9 @@ import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { member, product } from "@/db/schema";
+import { knowledgeSource, member, product } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { env } from "@/lib/env";
 
 export interface CreateProductValues {
   name: string;
@@ -38,6 +39,27 @@ export async function createProduct(
     createdAt: now,
     updatedAt: now,
   });
+
+  // Auto-bootstrap: if a URL is provided, create a sitemap source and kick off crawl immediately
+  if (values.url?.trim()) {
+    const sourceId = crypto.randomUUID();
+    await db.insert(knowledgeSource).values({
+      id: sourceId,
+      productId: id,
+      type: "sitemap",
+      name: "Website (auto-discovered)",
+      url: values.url.trim(),
+      status: "indexing",
+      chunkCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": env.BETTER_AUTH_API_KEY },
+      body: JSON.stringify({ sourceId, productId: id }),
+    }).catch(() => {});
+  }
 
   return { id };
 }

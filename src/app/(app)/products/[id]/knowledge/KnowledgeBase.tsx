@@ -12,6 +12,7 @@ type Source = {
   status: string;
   errorMessage: string | null;
   chunkCount: number;
+  lastCheckedAt: Date | null;
   updatedAt: Date;
 };
 

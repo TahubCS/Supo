@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, lt, isNull, or } from "drizzle-orm";
 
 import { db } from "@/db";
 import { knowledgeChunk, knowledgeSource } from "@/db/schema";
@@ -9,13 +9,10 @@ import { geminiEmbedMany } from "./ai";
 // Text chunking
 // ---------------------------------------------------------------------------
 
-// Splits text into overlapping chunks of ~800 chars, respecting paragraph
-// boundaries. Overlap is ~200 chars so adjacent chunks share context.
 export function chunkText(text: string): string[] {
   const TARGET = 800;
   const OVERLAP = 200;
 
-  // Normalize whitespace and split on blank lines / markdown headings
   const paragraphs = text
     .replace(/\r\n/g, "\n")
     .split(/\n{2,}/)
@@ -28,7 +25,6 @@ export function chunkText(text: string): string[] {
   for (const para of paragraphs) {
     if (current.length + para.length + 1 > TARGET && current.length > 0) {
       chunks.push(current.trim());
-      // Keep last OVERLAP chars as prefix for next chunk
       current = current.slice(-OVERLAP) + "\n\n" + para;
     } else {
       current = current ? current + "\n\n" + para : para;
@@ -39,6 +35,17 @@ export function chunkText(text: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Content hash — SHA-256, hex-encoded (built-in Web Crypto, no extra deps)
+// ---------------------------------------------------------------------------
+
+export async function computeHash(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// ---------------------------------------------------------------------------
 // Text extraction helpers
 // ---------------------------------------------------------------------------
 
@@ -46,7 +53,6 @@ export async function fetchUrl(url: string): Promise<string> {
   const res = await fetch(url, { headers: { "User-Agent": "Supo-Bot/1.0" } });
   if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
   const html = await res.text();
-  // Strip scripts, styles, then all tags
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -67,7 +73,6 @@ export async function fetchGitHub(repoUrl: string): Promise<GitHubFile[]> {
 
   const files: GitHubFile[] = [];
 
-  // Fetch README
   try {
     const r = await fetch(`${base}/readme`, { headers });
     if (r.ok) {
@@ -78,13 +83,17 @@ export async function fetchGitHub(repoUrl: string): Promise<GitHubFile[]> {
     // no readme
   }
 
-  // Fetch docs/ folder recursively (max 20 .md files)
   async function fetchDir(path: string, depth = 0) {
     if (files.length >= 20 || depth > 3) return;
     try {
       const r = await fetch(`${base}/contents/${path}`, { headers });
       if (!r.ok) return;
-      const items = (await r.json()) as Array<{ type: string; name: string; path: string; download_url: string | null }>;
+      const items = (await r.json()) as Array<{
+        type: string;
+        name: string;
+        path: string;
+        download_url: string | null;
+      }>;
       for (const item of items) {
         if (files.length >= 20) break;
         if (item.type === "dir") {
@@ -104,11 +113,83 @@ export async function fetchGitHub(repoUrl: string): Promise<GitHubFile[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Core ingestion
+// Sitemap-driven URL discovery (for "sitemap" source type)
 // ---------------------------------------------------------------------------
 
-// Pure function: chunk → embed → insert. Does NOT touch knowledgeSource status.
-// The caller (ingestSource) owns all status transitions.
+export async function discoverSitemapUrls(rootUrl: string): Promise<string[]> {
+  let root: URL;
+  try {
+    root = new URL(rootUrl);
+  } catch {
+    return [rootUrl];
+  }
+
+  const seen = new Set<string>();
+  seen.add(rootUrl);
+
+  // 1. Try sitemap.xml
+  try {
+    const sitemapUrl = `${root.origin}/sitemap.xml`;
+    const res = await fetch(sitemapUrl, {
+      headers: { "User-Agent": "Supo-Bot/1.0" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) {
+      const xml = await res.text();
+      const locs = [...xml.matchAll(/<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi)]
+        .map((m) => m[1].trim())
+        .filter((u) => {
+          try {
+            return new URL(u).hostname === root.hostname;
+          } catch {
+            return false;
+          }
+        });
+      for (const u of locs) {
+        seen.add(u);
+        if (seen.size >= 30) break;
+      }
+      // If sitemap gave us additional URLs, trust it
+      if (seen.size > 1) return [...seen].slice(0, 30);
+    }
+  } catch {
+    // sitemap not available — fall through
+  }
+
+  // 2. Fallback: extract same-domain <a href> links from root page
+  try {
+    const res = await fetch(rootUrl, {
+      headers: { "User-Agent": "Supo-Bot/1.0" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const hrefs = [...html.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((m) => m[1]);
+      for (const href of hrefs) {
+        try {
+          const u = new URL(href);
+          if (u.hostname !== root.hostname) continue;
+          // Deduplicate by stripping query strings
+          u.search = "";
+          u.hash = "";
+          seen.add(u.toString());
+        } catch {
+          // invalid URL
+        }
+        if (seen.size >= 30) break;
+      }
+    }
+  } catch {
+    // root page unavailable — return what we have
+  }
+
+  return [...seen].slice(0, 30);
+}
+
+// ---------------------------------------------------------------------------
+// Core ingestion — pure: chunk → embed → insert. Caller owns status updates.
+// ---------------------------------------------------------------------------
+
 export async function ingestText(
   text: string,
   sourceId: string,
@@ -130,13 +211,16 @@ export async function ingestText(
     createdAt: new Date(),
   }));
 
-  // Batch insert in groups of 50
   for (let i = 0; i < rows.length; i += 50) {
     await db.insert(knowledgeChunk).values(rows.slice(i, i + 50));
   }
 
   return chunks.length;
 }
+
+// ---------------------------------------------------------------------------
+// ingestSource — full re-index. Owns all status transitions + hash storage.
+// ---------------------------------------------------------------------------
 
 export async function ingestSource(sourceId: string, productId: string): Promise<void> {
   const source = await db.query.knowledgeSource.findFirst({
@@ -153,30 +237,57 @@ export async function ingestSource(sourceId: string, productId: string): Promise
 
   try {
     let total = 0;
+    let allContent = "";
 
     if (source.type === "article" || source.type === "conversation") {
       if (!source.content) throw new Error("No content to index");
+      allContent = source.content;
       total = await ingestText(source.content, sourceId, productId, { title: source.name });
     } else if (source.type === "url") {
       if (!source.url) throw new Error("No URL to fetch");
-      const text = await fetchUrl(source.url);
-      total = await ingestText(text, sourceId, productId, { title: source.name, url: source.url });
+      allContent = await fetchUrl(source.url);
+      total = await ingestText(allContent, sourceId, productId, {
+        title: source.name,
+        url: source.url,
+      });
     } else if (source.type === "github") {
       if (!source.url) throw new Error("No repo URL");
       const files = await fetchGitHub(source.url);
       if (files.length === 0) throw new Error("No markdown files found in repo");
+      allContent = files.map((f) => f.content).join("\n\n");
       for (const file of files) {
         total += await ingestText(file.content, sourceId, productId, {
           title: file.name,
           url: source.url,
         });
       }
+    } else if (source.type === "sitemap") {
+      if (!source.url) throw new Error("No URL");
+      const urls = await discoverSitemapUrls(source.url);
+      const pageContents: string[] = [];
+      for (const url of urls) {
+        try {
+          const text = await fetchUrl(url);
+          pageContents.push(text);
+          const title = url.split("/").filter(Boolean).pop() ?? url;
+          total += await ingestText(text, sourceId, productId, { title, url });
+        } catch {
+          // skip failed pages, continue with rest
+        }
+      }
+      allContent = pageContents.join("\n\n");
     }
 
-    // Single authoritative status update — only after all files are processed
+    const now = new Date();
     await db
       .update(knowledgeSource)
-      .set({ status: "indexed", chunkCount: total, updatedAt: new Date() })
+      .set({
+        status: "indexed",
+        chunkCount: total,
+        contentHash: await computeHash(allContent),
+        lastCheckedAt: now,
+        updatedAt: now,
+      })
       .where(eq(knowledgeSource.id, sourceId));
   } catch (err) {
     await db
@@ -187,6 +298,69 @@ export async function ingestSource(sourceId: string, productId: string): Promise
         updatedAt: new Date(),
       })
       .where(eq(knowledgeSource.id, sourceId));
-    // Don't re-throw — error is persisted to DB; caller gets a clean response
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ingestSourceIfChanged — used by cron. Skips re-embed when content unchanged.
+// ---------------------------------------------------------------------------
+
+export async function ingestSourceIfChanged(
+  sourceId: string,
+  productId: string,
+): Promise<"skipped" | "reindexed" | "error"> {
+  const source = await db.query.knowledgeSource.findFirst({
+    where: eq(knowledgeSource.id, sourceId),
+  });
+  if (!source) return "error";
+
+  try {
+    let currentContent = "";
+
+    if (source.type === "url") {
+      if (!source.url) return "error";
+      currentContent = await fetchUrl(source.url);
+    } else if (source.type === "github") {
+      if (!source.url) return "error";
+      const files = await fetchGitHub(source.url);
+      currentContent = files.map((f) => f.content).join("\n\n");
+    } else if (source.type === "sitemap") {
+      if (!source.url) return "error";
+      const urls = await discoverSitemapUrls(source.url);
+      const texts: string[] = [];
+      for (const url of urls) {
+        try {
+          texts.push(await fetchUrl(url));
+        } catch {
+          // skip
+        }
+      }
+      currentContent = texts.join("\n\n");
+    } else {
+      // article/conversation — can't auto-fetch; only checked if explicitly requested
+      return "skipped";
+    }
+
+    const currentHash = await computeHash(currentContent);
+    const now = new Date();
+
+    if (currentHash === source.contentHash) {
+      // Content unchanged — update timestamp only
+      await db
+        .update(knowledgeSource)
+        .set({ lastCheckedAt: now })
+        .where(eq(knowledgeSource.id, sourceId));
+      return "skipped";
+    }
+
+    // Content changed — full re-index
+    await ingestSource(sourceId, productId);
+    return "reindexed";
+  } catch {
+    await db
+      .update(knowledgeSource)
+      .set({ status: "error", updatedAt: new Date() })
+      .where(eq(knowledgeSource.id, sourceId));
+    return "error";
   }
 }
