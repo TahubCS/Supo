@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { member, product, widgetConfig } from "@/db/schema";
+import { widgetConfig } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 

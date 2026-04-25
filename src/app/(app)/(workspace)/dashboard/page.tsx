@@ -3,7 +3,6 @@ import { BarChart2, BookOpen, Code2, MessageSquare, Plus } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
 import { db } from "@/db";
 import { member, product } from "@/db/schema";
 import { auth } from "@/lib/auth";

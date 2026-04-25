@@ -25,7 +25,7 @@
   function setConvId(id) { sessionStorage.setItem(CONV_KEY, id); }
   function getCustomer() {
     try { return JSON.parse(localStorage.getItem(CUST_KEY) || 'null'); }
-    catch (e) { return null; }
+    catch { return null; }
   }
   function setCustomer(c) { localStorage.setItem(CUST_KEY, JSON.stringify(c)); }
 

@@ -1,9 +1,11 @@
-import { and, eq, inArray, lt, isNull, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { knowledgeChunk, knowledgeSource } from "@/db/schema";
 
 import { geminiEmbedMany } from "./ai";
+
+type KnowledgeChunkInsert = typeof knowledgeChunk.$inferInsert;
 
 // ---------------------------------------------------------------------------
 // Text chunking
@@ -196,12 +198,23 @@ export async function ingestText(
   productId: string,
   metadata: Record<string, unknown>,
 ): Promise<number> {
+  const rows = await buildChunkRows(text, sourceId, productId, metadata);
+  await insertChunkRows(rows);
+  return rows.length;
+}
+
+async function buildChunkRows(
+  text: string,
+  sourceId: string,
+  productId: string,
+  metadata: Record<string, unknown>,
+): Promise<KnowledgeChunkInsert[]> {
   const chunks = chunkText(text);
-  if (chunks.length === 0) return 0;
+  if (chunks.length === 0) return [];
 
   const embeddings = await geminiEmbedMany(chunks, productId);
 
-  const rows = chunks.map((content, i) => ({
+  return chunks.map((content, i) => ({
     id: crypto.randomUUID(),
     sourceId,
     productId,
@@ -210,12 +223,12 @@ export async function ingestText(
     metadata: JSON.stringify({ ...metadata, chunkIndex: i }),
     createdAt: new Date(),
   }));
+}
 
+async function insertChunkRows(rows: KnowledgeChunkInsert[]): Promise<void> {
   for (let i = 0; i < rows.length; i += 50) {
     await db.insert(knowledgeChunk).values(rows.slice(i, i + 50));
   }
-
-  return chunks.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,38 +241,38 @@ export async function ingestSource(sourceId: string, productId: string): Promise
   });
   if (!source) throw new Error("Source not found: " + sourceId);
 
-  // Delete existing chunks before re-indexing
-  await db.delete(knowledgeChunk).where(eq(knowledgeChunk.sourceId, sourceId));
-  await db
-    .update(knowledgeSource)
-    .set({ status: "indexing", errorMessage: null, updatedAt: new Date() })
-    .where(eq(knowledgeSource.id, sourceId));
+  if (source.status !== "indexed") {
+    await db
+      .update(knowledgeSource)
+      .set({ status: "indexing", errorMessage: null, updatedAt: new Date() })
+      .where(eq(knowledgeSource.id, sourceId));
+  }
 
   try {
-    let total = 0;
     let allContent = "";
+    const rows: KnowledgeChunkInsert[] = [];
 
     if (source.type === "article" || source.type === "conversation") {
       if (!source.content) throw new Error("No content to index");
       allContent = source.content;
-      total = await ingestText(source.content, sourceId, productId, { title: source.name });
+      rows.push(...await buildChunkRows(source.content, sourceId, productId, { title: source.name }));
     } else if (source.type === "url") {
       if (!source.url) throw new Error("No URL to fetch");
       allContent = await fetchUrl(source.url);
-      total = await ingestText(allContent, sourceId, productId, {
+      rows.push(...await buildChunkRows(allContent, sourceId, productId, {
         title: source.name,
         url: source.url,
-      });
+      }));
     } else if (source.type === "github") {
       if (!source.url) throw new Error("No repo URL");
       const files = await fetchGitHub(source.url);
       if (files.length === 0) throw new Error("No markdown files found in repo");
       allContent = files.map((f) => f.content).join("\n\n");
       for (const file of files) {
-        total += await ingestText(file.content, sourceId, productId, {
+        rows.push(...await buildChunkRows(file.content, sourceId, productId, {
           title: file.name,
           url: source.url,
-        });
+        }));
       }
     } else if (source.type === "sitemap") {
       if (!source.url) throw new Error("No URL");
@@ -270,7 +283,7 @@ export async function ingestSource(sourceId: string, productId: string): Promise
           const text = await fetchUrl(url);
           pageContents.push(text);
           const title = url.split("/").filter(Boolean).pop() ?? url;
-          total += await ingestText(text, sourceId, productId, { title, url });
+          rows.push(...await buildChunkRows(text, sourceId, productId, { title, url }));
         } catch {
           // skip failed pages, continue with rest
         }
@@ -278,22 +291,35 @@ export async function ingestSource(sourceId: string, productId: string): Promise
       allContent = pageContents.join("\n\n");
     }
 
+    if (rows.length === 0) {
+      throw new Error("No indexable content found");
+    }
+
     const now = new Date();
-    await db
-      .update(knowledgeSource)
-      .set({
-        status: "indexed",
-        chunkCount: total,
-        contentHash: await computeHash(allContent),
-        lastCheckedAt: now,
-        updatedAt: now,
-      })
-      .where(eq(knowledgeSource.id, sourceId));
+    const contentHash = await computeHash(allContent);
+
+    await db.transaction(async (tx) => {
+      await tx.delete(knowledgeChunk).where(eq(knowledgeChunk.sourceId, sourceId));
+      for (let i = 0; i < rows.length; i += 50) {
+        await tx.insert(knowledgeChunk).values(rows.slice(i, i + 50));
+      }
+      await tx
+        .update(knowledgeSource)
+        .set({
+          status: "indexed",
+          chunkCount: rows.length,
+          contentHash,
+          lastCheckedAt: now,
+          errorMessage: null,
+          updatedAt: now,
+        })
+        .where(eq(knowledgeSource.id, sourceId));
+    });
   } catch (err) {
     await db
       .update(knowledgeSource)
       .set({
-        status: "error",
+        status: source.status === "indexed" ? "indexed" : "error",
         errorMessage: err instanceof Error ? err.message : String(err),
         updatedAt: new Date(),
       })
@@ -356,10 +382,14 @@ export async function ingestSourceIfChanged(
     // Content changed — full re-index
     await ingestSource(sourceId, productId);
     return "reindexed";
-  } catch {
+  } catch (err) {
     await db
       .update(knowledgeSource)
-      .set({ status: "error", updatedAt: new Date() })
+      .set({
+        status: source.status === "indexed" ? "indexed" : "error",
+        errorMessage: err instanceof Error ? err.message : String(err),
+        updatedAt: new Date(),
+      })
       .where(eq(knowledgeSource.id, sourceId));
     return "error";
   }

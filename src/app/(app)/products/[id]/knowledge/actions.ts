@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { knowledgeChunk, knowledgeSource, member, product } from "@/db/schema";
+import { knowledgeSource, member, product } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
@@ -105,10 +105,17 @@ export async function reindexSource(sourceId: string): Promise<void> {
     throw new Error("Not found");
   }
 
-  await db
-    .update(knowledgeSource)
-    .set({ status: "indexing", chunkCount: 0, errorMessage: null, updatedAt: new Date() })
-    .where(eq(knowledgeSource.id, sourceId));
+  if (source.status !== "indexed") {
+    await db
+      .update(knowledgeSource)
+      .set({ status: "indexing", chunkCount: 0, errorMessage: null, updatedAt: new Date() })
+      .where(eq(knowledgeSource.id, sourceId));
+  } else {
+    await db
+      .update(knowledgeSource)
+      .set({ errorMessage: null, updatedAt: new Date() })
+      .where(eq(knowledgeSource.id, sourceId));
+  }
 
   const baseUrl = env.BETTER_AUTH_URL;
   fetch(`${baseUrl}/api/knowledge/ingest`, {

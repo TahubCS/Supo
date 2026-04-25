@@ -93,18 +93,31 @@ export function ConversationThread({
   const [replyBody, setReplyBody] = useState("");
   const [isPending, startTransition] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const conversationId = conversation?.id ?? null;
 
   useEffect(() => {
-    if (!conversation) {
-      setMessages([]);
-      return;
+    let cancelled = false;
+
+    async function loadMessages() {
+      if (!conversationId) {
+        setMessages([]);
+        return;
+      }
+
+      setLoadingMessages(true);
+      const msgs = await getMessages(conversationId);
+      if (!cancelled) {
+        setMessages(msgs as MessageRow[]);
+        setLoadingMessages(false);
+      }
     }
-    setLoadingMessages(true);
-    getMessages(conversation.id).then((msgs) => {
-      setMessages(msgs as MessageRow[]);
-      setLoadingMessages(false);
-    });
-  }, [conversation?.id]);
+
+    void loadMessages();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

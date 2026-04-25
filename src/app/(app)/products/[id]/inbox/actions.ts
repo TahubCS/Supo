@@ -4,7 +4,7 @@ import { asc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { conversation, knowledgeSource, member, message, product } from "@/db/schema";
+import { conversation, knowledgeSource, member, message } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { geminiGenerate } from "@/lib/knowledge/ai";

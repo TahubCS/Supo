@@ -1,8 +1,7 @@
-import { eq, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { knowledgeChunk, knowledgeSource } from "@/db/schema";
 import { env } from "@/lib/env";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
 
