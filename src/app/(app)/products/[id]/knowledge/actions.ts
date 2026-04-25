@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { knowledgeSource, member, product } from "@/db/schema";
+import { knowledgeSource, knowledgeSuggestion, member, product } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
@@ -26,6 +26,26 @@ async function verifyProductAccess(productId: string) {
   }
 
   return { session, membership };
+}
+
+async function verifySuggestionAccess(suggestionId: string) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) throw new Error("Unauthorized");
+
+  const suggestion = await db.query.knowledgeSuggestion.findFirst({
+    where: eq(knowledgeSuggestion.id, suggestionId),
+    with: { product: { columns: { id: true, organizationId: true } } },
+  });
+  if (!suggestion) throw new Error("Not found");
+
+  const membership = await db.query.member.findFirst({
+    where: eq(member.userId, session.user.id),
+  });
+  if (!membership || membership.organizationId !== suggestion.product.organizationId) {
+    throw new Error("Not found");
+  }
+
+  return { session, suggestion };
 }
 
 export type AddSourceInput = {
@@ -126,6 +146,69 @@ export async function reindexSource(sourceId: string): Promise<void> {
     },
     body: JSON.stringify({ sourceId, productId: source.product.id }),
   }).catch(() => {});
+}
+
+export async function approveSuggestion(suggestionId: string): Promise<void> {
+  const { session, suggestion } = await verifySuggestionAccess(suggestionId);
+  if (suggestion.status !== "pending") throw new Error("Suggestion already reviewed");
+
+  const now = new Date();
+  const sourceId = crypto.randomUUID();
+
+  await db.transaction(async (tx) => {
+    await tx.insert(knowledgeSource).values({
+      id: sourceId,
+      productId: suggestion.productId,
+      type: "conversation",
+      name: suggestion.question,
+      url: null,
+      content: suggestion.content,
+      status: "indexing",
+      chunkCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await tx
+      .update(knowledgeSuggestion)
+      .set({
+        status: "approved",
+        approvedSourceId: sourceId,
+        reviewedById: session.user.id,
+        reviewedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(knowledgeSuggestion.id, suggestionId));
+  });
+
+  fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": env.BETTER_AUTH_API_KEY,
+    },
+    body: JSON.stringify({ sourceId, productId: suggestion.productId }),
+  }).catch(() => {});
+}
+
+export async function rejectSuggestion(
+  suggestionId: string,
+  reviewNote?: string,
+): Promise<void> {
+  const { session, suggestion } = await verifySuggestionAccess(suggestionId);
+  if (suggestion.status !== "pending") throw new Error("Suggestion already reviewed");
+
+  const now = new Date();
+  await db
+    .update(knowledgeSuggestion)
+    .set({
+      status: "rejected",
+      reviewNote: reviewNote?.trim() || null,
+      reviewedById: session.user.id,
+      reviewedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(knowledgeSuggestion.id, suggestionId));
 }
 
 export type QueryResult = {

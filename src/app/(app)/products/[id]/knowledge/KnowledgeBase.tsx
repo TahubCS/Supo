@@ -1,6 +1,7 @@
 "use client";
 
 import { AddSourceDialog } from "./AddSourceDialog";
+import { SuggestionList, type Suggestion } from "./SuggestionList";
 import { SourceList } from "./SourceList";
 import { TestQueryPanel } from "./TestQueryPanel";
 
@@ -19,12 +20,25 @@ type Source = {
 export function KnowledgeBase({
   productId,
   sources,
+  suggestions,
 }: {
   productId: string;
   sources: Source[];
+  suggestions: Suggestion[];
 }) {
   return (
     <div className="space-y-8">
+      {/* Suggestions section */}
+      <div className="space-y-4">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Pending suggestions</p>
+          <p className="text-xs text-[color:var(--text-secondary)]">
+            {suggestions.length} suggestion{suggestions.length !== 1 ? "s" : ""} awaiting review
+          </p>
+        </div>
+        <SuggestionList suggestions={suggestions} />
+      </div>
+
       {/* Sources section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">

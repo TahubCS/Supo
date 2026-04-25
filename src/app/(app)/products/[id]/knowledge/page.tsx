@@ -1,9 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { db } from "@/db";
-import { knowledgeSource, member, product } from "@/db/schema";
+import { knowledgeSource, knowledgeSuggestion, member, product } from "@/db/schema";
 import { auth } from "@/lib/auth";
 
 import { KnowledgeBase } from "./KnowledgeBase";
@@ -35,11 +35,34 @@ export default async function KnowledgePage({
     orderBy: (s, { desc }) => [desc(s.createdAt)],
   });
 
+  const suggestions = await db.query.knowledgeSuggestion.findMany({
+    where: and(
+      eq(knowledgeSuggestion.productId, id),
+      eq(knowledgeSuggestion.status, "pending"),
+    ),
+    with: {
+      sourceConversation: {
+        columns: {
+          id: true,
+          subject: true,
+          status: true,
+          lastMessageAt: true,
+        },
+        with: {
+          customer: {
+            columns: { id: true, name: true, email: true },
+          },
+        },
+      },
+    },
+    orderBy: (s, { desc }) => [desc(s.createdAt)],
+  });
+
   return (
     <div className="px-8 py-8">
       <p className="mb-3 text-sm text-[color:var(--text-secondary)]">Knowledge</p>
       <h1 className="mb-8 text-3xl font-bold tracking-tight text-foreground">Knowledge base</h1>
-      <KnowledgeBase productId={id} sources={sources} />
+      <KnowledgeBase productId={id} sources={sources} suggestions={suggestions} />
     </div>
   );
 }

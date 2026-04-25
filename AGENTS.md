@@ -202,12 +202,13 @@ src/app/
           actions.ts                      ← getMessages, resolveConversation, snoozeConversation, reopenConversation, sendMessage
           types.ts                        ← ConversationWithDetails type shared across inbox components
         knowledge/
-          page.tsx                        ← server component: fetches knowledge sources, renders KnowledgeBase
-          KnowledgeBase.tsx               ← client orchestrator: SourceList + AddSourceDialog + TestQueryPanel
+          page.tsx                        ← server component: fetches knowledge sources + pending suggestions, renders KnowledgeBase
+          KnowledgeBase.tsx               ← client orchestrator: SuggestionList + SourceList + AddSourceDialog + TestQueryPanel
+          SuggestionList.tsx              ← pending suggestion cards, detail dialog, approve/reject controls
           SourceList.tsx                  ← grid of source cards with status badges, re-index, delete
           AddSourceDialog.tsx             ← dialog: Article / URL / GitHub segmented type selector
           TestQueryPanel.tsx              ← test Q&A: question input → RAG answer + source citations
-          actions.ts                      ← addSource, deleteSource, reindexSource, testQuery
+          actions.ts                      ← addSource, deleteSource, reindexSource, approveSuggestion, rejectSuggestion, testQuery
         analytics/page.tsx
   (auth)/
     layout.tsx
@@ -342,7 +343,7 @@ App-owned tables currently in `src/db/schema.ts`:
 - `conversation` — product-scoped. A support thread between a customer and the product's support surface. Columns: `id`, `product_id`, `customer_id`, `status` (open/resolved/snoozed), `assignee_id`, `ai_handled`, `subject`, `last_message_at`, `created_at`, `updated_at`.
 - `message` — conversation-scoped. Individual messages within a conversation. Columns: `id`, `conversation_id`, `body`, `sender_type` (customer/ai/agent), `sender_id`, `created_at`.
 - `knowledge_source` — product-scoped. A single knowledge source. Columns: `id`, `product_id`, `type` (article/url/github/conversation/sitemap), `name`, `url`, `content`, `status` (pending/indexing/indexed/error), `error_message`, `chunk_count`, `content_hash` (SHA-256 of last fetched content for change detection), `last_checked_at` (last time content was fetched and compared by cron), `created_at`, `updated_at`. The `"sitemap"` type is auto-created when a product is created with a URL — it crawls multiple pages discovered via sitemap.xml.
-- `knowledge_suggestion` — product-scoped. Review queue for proposed KB updates generated from support conversations or future missing-knowledge detection. Columns: `id`, `product_id`, `source_conversation_id`, `approved_source_id`, `status` (pending/approved/rejected), `confidence`, `question`, `answer`, `content`, `reason`, `review_note`, `reviewed_by_id`, `reviewed_at`, `created_at`, `updated_at`. Approval will later create or link a `knowledge_source`; this table stores the draft and audit state.
+- `knowledge_suggestion` — product-scoped. Review queue for proposed KB updates generated from support conversations or future missing-knowledge detection. Columns: `id`, `product_id`, `source_conversation_id`, `approved_source_id`, `status` (pending/approved/rejected), `confidence`, `question`, `answer`, `content`, `reason`, `review_note`, `reviewed_by_id`, `reviewed_at`, `created_at`, `updated_at`. Approval creates and links a `knowledge_source`; rejection preserves the draft and audit state.
 - `knowledge_chunk` — source-scoped (denormalized `product_id` for fast search). Stores one text chunk with its pgvector embedding. Columns: `id`, `source_id`, `product_id`, `content`, `embedding` (vector(768)), `metadata` (JSON: title/url/chunkIndex), `created_at`. Has an HNSW index on `embedding` using cosine distance.
 
 ### Tenancy model
@@ -562,9 +563,10 @@ Build this in prompt-by-prompt slices, in this order, so the knowledge system be
 
 1. Implemented: `knowledge_suggestion` stores proposed KB updates with product scope, source conversation, draft question/answer/content, status, confidence, reviewer metadata, and optional approved source linkage.
 2. Implemented: resolving a conversation attempts to generate a pending `knowledge_suggestion` from the transcript after the status update succeeds. Suggestion generation failures must not block resolving the conversation.
-3. Next: show pending suggestions in the Knowledge page using existing UI primitives.
-4. Next: add approve/reject actions. Approval creates or updates a `knowledge_source` and indexes it; rejection preserves an audit trail.
+3. Implemented: pending suggestions are shown on the Knowledge page above Sources using `SuggestionList`, with confidence, reason, source conversation/customer metadata, and a detail dialog.
+4. Implemented: suggestions can be approved or rejected from the Knowledge page. Approval creates a `knowledge_source` of type `"conversation"`, links it through `approved_source_id`, marks the suggestion approved, and fires background ingestion. Rejection marks the suggestion rejected and preserves review metadata.
 5. Safe re-indexing is already implemented in `src/lib/knowledge/ingest.ts`: prepare replacement chunks first, commit the chunk swap in a transaction, and keep the previous indexed chunks usable on failure.
+6. Next: missing-knowledge detection. Do not implement this with placeholder answers; the current `knowledge_suggestion` schema requires real `answer` and `content`, so unanswered gap capture needs a separate schema plan first.
 
 ### Background ingestion pattern
 
