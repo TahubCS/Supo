@@ -1,6 +1,6 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText } from "ai";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
@@ -26,6 +26,7 @@ const CORS: HeadersInit = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Expose-Headers": "x-conversation-id, x-sources",
 };
 // Cap widget messages to limit abuse and keep prompt size bounded.
 const MAX_WIDGET_MESSAGE_LENGTH = 2000;
@@ -221,6 +222,17 @@ export async function POST(req: NextRequest) {
         ),
       })
     : null;
+
+  if (!conv) {
+    conv = await db.query.conversation.findFirst({
+      where: and(
+        eq(conversation.productId, productId),
+        eq(conversation.customerId, cust.id),
+        eq(conversation.status, "open"),
+      ),
+      orderBy: [desc(conversation.lastMessageAt)],
+    });
+  }
 
   if (!conv) {
     const convId = crypto.randomUUID();

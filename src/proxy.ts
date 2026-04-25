@@ -19,6 +19,7 @@ const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Expose-Headers": "x-conversation-id, x-sources",
 };
 const MAX_CHAT_BODY_BYTES = 16 * 1024;
 const AUTH_POST_PATHS = new Set([

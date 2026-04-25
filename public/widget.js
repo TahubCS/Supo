@@ -21,13 +21,27 @@
   var CONV_KEY = 'supo_conv_' + productId;
   var CUST_KEY = 'supo_cust_' + productId;
 
-  function getConvId()   { return sessionStorage.getItem(CONV_KEY) || null; }
-  function setConvId(id) { sessionStorage.setItem(CONV_KEY, id); }
+  function customerConvKey(customer) {
+    var email = customer && customer.email ? String(customer.email).trim().toLowerCase() : 'anonymous';
+    return CONV_KEY + '_' + email;
+  }
+  function getConvId(customer) {
+    return localStorage.getItem(customerConvKey(customer))
+      || sessionStorage.getItem(CONV_KEY)
+      || null;
+  }
+  function setConvId(id, customer) {
+    localStorage.setItem(customerConvKey(customer), id);
+    sessionStorage.setItem(CONV_KEY, id);
+  }
   function getCustomer() {
     try { return JSON.parse(localStorage.getItem(CUST_KEY) || 'null'); }
     catch { return null; }
   }
-  function setCustomer(c) { localStorage.setItem(CUST_KEY, JSON.stringify(c)); }
+  function setCustomer(c) {
+    if (c && c.email) c.email = String(c.email).trim().toLowerCase();
+    localStorage.setItem(CUST_KEY, JSON.stringify(c));
+  }
 
   // ── State ────────────────────────────────────────────────────────────────
   var cfg = {
@@ -336,7 +350,7 @@
       body: JSON.stringify({
         productId: productId,
         message: text,
-        conversationId: getConvId() || undefined,
+        conversationId: getConvId(customer) || undefined,
         customer: customer,
       }),
     })
@@ -344,7 +358,7 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
 
       var convId = res.headers.get('x-conversation-id');
-      if (convId) setConvId(convId);
+      if (convId) setConvId(convId, customer);
 
       // Replace typing indicator with an empty AI bubble
       messages[messages.length - 1] = { role: 'ai', text: '' };
