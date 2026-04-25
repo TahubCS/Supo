@@ -162,10 +162,14 @@ export function ConversationThread({
     if (!conversation) return;
     startTransition(async () => {
       try {
-        await learnFromConversation(conversation.id);
-        toast.success("Added to knowledge base");
+        const result = await learnFromConversation(conversation.id);
+        toast.success(
+          result === "existing"
+            ? "Knowledge suggestion already exists"
+            : "Knowledge suggestion created",
+        );
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to learn from conversation");
+        toast.error(err instanceof Error ? err.message : "Failed to create knowledge suggestion");
       }
     });
   }
@@ -244,7 +248,7 @@ export function ConversationThread({
                 size="sm"
                 disabled={isPending}
                 onClick={handleLearn}
-                title="Extract FAQ and add to knowledge base"
+                title="Create knowledge suggestion"
                 className="gap-1.5 rounded-lg text-xs text-[color:var(--text-secondary)] hover:text-foreground"
               >
                 <BookOpen className="size-3.5" />

@@ -561,7 +561,7 @@ One embedding model is assigned per product and stored in `product.embedding_mod
 Build this in prompt-by-prompt slices, in this order, so the knowledge system becomes deliberate instead of a vague feature pile:
 
 1. Implemented: `knowledge_suggestion` stores proposed KB updates with product scope, source conversation, draft question/answer/content, status, confidence, reviewer metadata, and optional approved source linkage.
-2. Next: on resolved conversations, automatically generate a draft KB suggestion instead of requiring the agent to click Learn manually.
+2. Implemented: resolving a conversation attempts to generate a pending `knowledge_suggestion` from the transcript after the status update succeeds. Suggestion generation failures must not block resolving the conversation.
 3. Next: show pending suggestions in the Knowledge page using existing UI primitives.
 4. Next: add approve/reject actions. Approval creates or updates a `knowledge_source` and indexes it; rejection preserves an audit trail.
 5. Safe re-indexing is already implemented in `src/lib/knowledge/ingest.ts`: prepare replacement chunks first, commit the chunk swap in a transaction, and keep the previous indexed chunks usable on failure.
@@ -584,7 +584,7 @@ Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return
 
 ### Learn from conversation
 
-`learnFromConversation(conversationId)` in `inbox/actions.ts` fetches the full message transcript, sends it to `geminiGenerate` with a FAQ extraction prompt, inserts a `knowledge_source` of type `"conversation"`, and fires background ingestion. Visible as a "Learn" button on resolved conversations in the inbox thread header.
+`learnFromConversation(conversationId)` in `inbox/actions.ts` fetches the full message transcript, sends it to `geminiGenerate` with a FAQ extraction prompt, and creates a pending `knowledge_suggestion`. It returns `"created"` or `"existing"` and does not create or index a `knowledge_source` directly. The "Learn" button on resolved conversations now routes manual learning into the review queue. `resolveConversation(conversationId)` also attempts the same suggestion generation after updating the conversation status, but catches suggestion errors so resolving a conversation is never blocked by AI extraction.
 
 ## Chat API
 

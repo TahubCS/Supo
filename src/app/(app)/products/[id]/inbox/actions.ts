@@ -4,12 +4,18 @@ import { asc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { conversation, knowledgeSource, member, message } from "@/db/schema";
+import { conversation, knowledgeSuggestion, member, message } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { env } from "@/lib/env";
 import { geminiGenerate } from "@/lib/knowledge/ai";
 
 type MessageRow = typeof message.$inferSelect;
+type SuggestionResult = "created" | "existing";
+type ExtractedSuggestion = {
+  question: string;
+  answer: string;
+  reason?: string;
+  confidence?: number;
+};
 
 async function verifyConversationAccess(conversationId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -62,6 +68,12 @@ export async function resolveConversation(conversationId: string): Promise<void>
     .update(conversation)
     .set({ status: "resolved", updatedAt: now })
     .where(eq(conversation.id, conversationId));
+
+  try {
+    await createKnowledgeSuggestionFromConversation(conversationId);
+  } catch {
+    // Conversation resolution must not be blocked by AI extraction failures.
+  }
 }
 
 export async function snoozeConversation(conversationId: string): Promise<void> {
@@ -104,8 +116,42 @@ export async function sendMessage(
     .where(eq(conversation.id, conversationId));
 }
 
-export async function learnFromConversation(conversationId: string): Promise<void> {
+function clampConfidence(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function parseExtractedSuggestion(raw: string): ExtractedSuggestion {
+  const match = raw.match(/\{[\s\S]*\}/);
+  const parsed = JSON.parse(match?.[0] ?? raw) as Partial<ExtractedSuggestion>;
+
+  const question = typeof parsed.question === "string" ? parsed.question.trim() : "";
+  const answer = typeof parsed.answer === "string" ? parsed.answer.trim() : "";
+
+  if (!question || !answer) {
+    throw new Error("Invalid FAQ shape");
+  }
+
+  return {
+    question,
+    answer,
+    reason:
+      typeof parsed.reason === "string" && parsed.reason.trim()
+        ? parsed.reason.trim()
+        : undefined,
+    confidence: parsed.confidence,
+  };
+}
+
+async function createKnowledgeSuggestionFromConversation(
+  conversationId: string,
+): Promise<SuggestionResult> {
   const { conv } = await verifyConversationAccess(conversationId);
+
+  const existing = await db.query.knowledgeSuggestion.findFirst({
+    where: eq(knowledgeSuggestion.sourceConversationId, conversationId),
+  });
+  if (existing) return "existing";
 
   const messages = await db.query.message.findMany({
     where: eq(message.conversationId, conversationId),
@@ -120,45 +166,45 @@ export async function learnFromConversation(conversationId: string): Promise<voi
 
   const systemPrompt = `You are a knowledge base curator. Extract a clear FAQ entry from this support conversation.
 Return ONLY a JSON object with this exact shape:
-{ "question": "...", "answer": "..." }
-The question should be what the customer was asking. The answer should be the correct solution.`;
+{ "question": "...", "answer": "...", "reason": "...", "confidence": 0 }
+The question should be what the customer was asking.
+The answer should be the correct solution.
+The reason should briefly explain why this belongs in the knowledge base.
+The confidence should be an integer from 0 to 100.`;
 
   const raw = await geminiGenerate(transcript, systemPrompt);
 
-  let faq: { question: string; answer: string };
+  let faq: ExtractedSuggestion;
   try {
-    const match = raw.match(/\{[\s\S]*\}/);
-    faq = JSON.parse(match?.[0] ?? raw);
-    if (!faq.question || !faq.answer) throw new Error("Invalid FAQ shape");
+    faq = parseExtractedSuggestion(raw);
   } catch {
     throw new Error("AI could not extract a FAQ from this conversation");
   }
 
   const content = `**Q: ${faq.question}**\n\n${faq.answer}`;
-  const subject = conv.subject ?? faq.question.slice(0, 60);
   const now = new Date();
-  const sourceId = crypto.randomUUID();
 
-  await db.insert(knowledgeSource).values({
-    id: sourceId,
+  await db.insert(knowledgeSuggestion).values({
+    id: crypto.randomUUID(),
     productId: conv.productId,
-    type: "conversation",
-    name: subject,
-    url: null,
+    sourceConversationId: conversationId,
+    approvedSourceId: null,
+    status: "pending",
+    confidence: clampConfidence(faq.confidence),
+    question: faq.question,
+    answer: faq.answer,
     content,
-    status: "indexing",
-    chunkCount: 0,
+    reason: faq.reason ?? null,
+    reviewNote: null,
+    reviewedById: null,
+    reviewedAt: null,
     createdAt: now,
     updatedAt: now,
   });
 
-  // Fire ingestion in background
-  fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": env.BETTER_AUTH_API_KEY,
-    },
-    body: JSON.stringify({ sourceId, productId: conv.productId }),
-  }).catch(() => {});
+  return "created";
+}
+
+export async function learnFromConversation(conversationId: string): Promise<SuggestionResult> {
+  return createKnowledgeSuggestionFromConversation(conversationId);
 }
