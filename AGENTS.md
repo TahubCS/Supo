@@ -128,7 +128,7 @@ This is the workspace management surface.
 - Current tables in `src/db/schema.ts`:
   - Better Auth core: `user`, `session`, `account`, `verification`
   - Organization plugin: `organization`, `member`, `invitation`
-  - App-owned: `product`, `widget_config`, `customer`, `conversation`, `message`, `knowledge_source`, `knowledge_chunk`
+  - App-owned: `product`, `widget_config`, `customer`, `conversation`, `message`, `knowledge_source`, `knowledge_suggestion`, `knowledge_chunk`
 - `product` is the first app-owned table. It belongs to an `organization` and is the unit around which knowledge, conversations, widget config, and analytics are scoped.
 - `widget_config` is scoped to `product_id` (one-to-one), not `organization_id`. Do not revert this — widget config is per-product, not per-workspace.
 - The `organization` table is the tenant anchor. Do not reintroduce a separate `workspaces` table — the earlier placeholder was dropped on purpose.
@@ -223,6 +223,8 @@ src/app/
     knowledge/
       ingest/route.ts                     ← POST: background ingestion (maxDuration=300); auth via x-api-key
       query/route.ts                      ← POST: RAG query (embed → pgvector search → generate)
+    cron/
+      sync-knowledge/route.ts             ← GET: daily cron (02:00 UTC); re-indexes stale sources with change detection
 
 src/components/
   WorkspaceSidebar.tsx                  ← workspace-level nav (Products, Settings, user/sign-out)
@@ -339,7 +341,8 @@ App-owned tables currently in `src/db/schema.ts`:
 - `customer` — org-scoped. Represents the end-user who initiates support conversations. Columns: `id`, `organization_id`, `name`, `email`, `created_at`.
 - `conversation` — product-scoped. A support thread between a customer and the product's support surface. Columns: `id`, `product_id`, `customer_id`, `status` (open/resolved/snoozed), `assignee_id`, `ai_handled`, `subject`, `last_message_at`, `created_at`, `updated_at`.
 - `message` — conversation-scoped. Individual messages within a conversation. Columns: `id`, `conversation_id`, `body`, `sender_type` (customer/ai/agent), `sender_id`, `created_at`.
-- `knowledge_source` — product-scoped. A single knowledge source (article, URL, GitHub repo, or extracted conversation). Columns: `id`, `product_id`, `type` (article/url/github/conversation), `name`, `url`, `content`, `status` (pending/indexing/indexed/error), `error_message`, `chunk_count`, `created_at`, `updated_at`.
+- `knowledge_source` — product-scoped. A single knowledge source. Columns: `id`, `product_id`, `type` (article/url/github/conversation/sitemap), `name`, `url`, `content`, `status` (pending/indexing/indexed/error), `error_message`, `chunk_count`, `content_hash` (SHA-256 of last fetched content for change detection), `last_checked_at` (last time content was fetched and compared by cron), `created_at`, `updated_at`. The `"sitemap"` type is auto-created when a product is created with a URL — it crawls multiple pages discovered via sitemap.xml.
+- `knowledge_suggestion` — product-scoped. Review queue for proposed KB updates generated from support conversations or future missing-knowledge detection. Columns: `id`, `product_id`, `source_conversation_id`, `approved_source_id`, `status` (pending/approved/rejected), `confidence`, `question`, `answer`, `content`, `reason`, `review_note`, `reviewed_by_id`, `reviewed_at`, `created_at`, `updated_at`. Approval will later create or link a `knowledge_source`; this table stores the draft and audit state.
 - `knowledge_chunk` — source-scoped (denormalized `product_id` for fast search). Stores one text chunk with its pgvector embedding. Columns: `id`, `source_id`, `product_id`, `content`, `embedding` (vector(768)), `metadata` (JSON: title/url/chunkIndex), `created_at`. Has an HNSW index on `embedding` using cosine distance.
 
 ### Tenancy model
@@ -378,7 +381,7 @@ Every app-owned table must:
 - When schema files change, generate and apply migrations in the same body of work when feasible.
 - If the database layer changes materially, update `AGENTS.md` to reflect the new source-of-truth files and commands.
 - `bun run db:generate` requires a TTY to resolve column rename conflicts interactively. If running in a non-TTY environment (CI, agent shells), write the migration SQL and snapshot manually and record the hash in `drizzle.__drizzle_migrations` after applying it.
-- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index).
+- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue).
 
 ## Theme Rules
 
@@ -511,7 +514,7 @@ When porting new sections or building dashboard screens, read these files as the
 
 ### Packages
 
-- `ai` (Vercel AI SDK v4) — unified interface for embed, embedMany, generateText
+- `ai` (Vercel AI SDK v6) — unified interface for embed, embedMany, generateText, and streamText
 - `@ai-sdk/google` — Google provider; used for both generation and embeddings via `createGoogleGenerativeAI`
 
 ### Generation model chain
@@ -544,14 +547,36 @@ One embedding model is assigned per product and stored in `product.embedding_mod
 
 `src/lib/knowledge/ingest.ts`:
 - `chunkText(text)` — paragraph-based split, ~800 char chunks, 200-char overlap
+- `computeHash(text)` — SHA-256 of text, hex-encoded (Web Crypto, no deps); stored in `content_hash` after each index
 - `fetchUrl(url)` — fetch → strip HTML → max 100KB plain text
 - `fetchGitHub(repoUrl)` — fetches README + `docs/` `.md` files from public repos via GitHub Contents API (max 20 files, no auth needed)
-- `ingestText(text, sourceId, productId, metadata)` — chunk → embed (batch 50) → insert → update source status
-- `ingestSource(sourceId, productId)` — dispatches to ingestText by source type; sets status="error" on failure
+- `discoverSitemapUrls(rootUrl)` — finds up to 30 same-domain URLs via sitemap.xml; falls back to extracting `<a href>` links from the root page
+- `ingestText(text, sourceId, productId, metadata)` — chunk → embed (batch 100 in `geminiEmbedMany`) → insert; does NOT touch source status
+- `ingestSource(sourceId, productId)` — full re-index; dispatches by type (includes `"sitemap"`); prepares all replacement chunks before deleting existing chunks, then swaps chunks and updates source metadata inside one DB transaction
+- `ingestSourceIfChanged(sourceId, productId)` — used by cron: fetches current content, hashes it, compares to stored hash. Returns `"skipped"` if unchanged (only updates `last_checked_at`), `"reindexed"` if changed, `"error"` on fetch failure
+- Safe re-index rule: previously indexed sources must remain queryable if a later fetch/embed/index attempt fails. Do not delete old chunks or set an already-indexed source to `error` before the replacement index has been successfully prepared and committed.
+
+### Knowledge automation roadmap
+
+Build this in prompt-by-prompt slices, in this order, so the knowledge system becomes deliberate instead of a vague feature pile:
+
+1. Implemented: `knowledge_suggestion` stores proposed KB updates with product scope, source conversation, draft question/answer/content, status, confidence, reviewer metadata, and optional approved source linkage.
+2. Next: on resolved conversations, automatically generate a draft KB suggestion instead of requiring the agent to click Learn manually.
+3. Next: show pending suggestions in the Knowledge page using existing UI primitives.
+4. Next: add approve/reject actions. Approval creates or updates a `knowledge_source` and indexes it; rejection preserves an audit trail.
+5. Safe re-indexing is already implemented in `src/lib/knowledge/ingest.ts`: prepare replacement chunks first, commit the chunk swap in a transaction, and keep the previous indexed chunks usable on failure.
 
 ### Background ingestion pattern
 
 Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return immediately. The API route uses `export const maxDuration = 300` to support up to 5 minutes of ingestion work without blocking the UI. Auth is a shared `BETTER_AUTH_API_KEY` header (internal only).
+
+### Auto-bootstrap on product creation
+
+`createProduct` in `src/app/(app)/(workspace)/dashboard/actions.ts` automatically creates a `"sitemap"` knowledge source and fires background ingestion when a product URL is provided. Zero-touch: the developer just fills in the product URL during setup and the AI immediately starts learning about the product.
+
+### Daily cron sync
+
+`GET /api/cron/sync-knowledge` (auth: `x-api-key` header) runs nightly at 02:00 UTC via Vercel Cron (`vercel.json`). It queries all `url`/`github`/`sitemap` sources not checked in the last 23 hours and calls `ingestSourceIfChanged` on each sequentially. Sources whose content hash matches are skipped (no re-embedding). Returns `{ synced, skipped, errors, total }`. To test locally: `curl -H "x-api-key: <BETTER_AUTH_API_KEY>" http://localhost:3000/api/cron/sync-knowledge`.
 
 ### RAG query
 
@@ -633,4 +658,3 @@ Server actions fire-and-forget a `fetch()` to `/api/knowledge/ingest` and return
 - New workspace-scoped features go under `src/app/(app)/(workspace)/`. They get the `WorkspaceSidebar` automatically from `(workspace)/layout.tsx`.
 - Do not add a new sidebar component — extend `WorkspaceSidebar` or `ProductSidebar` instead.
 - `embed code` in `WidgetConfigurator` uses `productId` (not `workspaceId` or `orgId`) as the identifier sent to `window.SupoSettings`. Any future widget loader must read `productId`.
-

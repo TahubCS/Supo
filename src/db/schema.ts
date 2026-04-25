@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { boolean, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -97,6 +97,7 @@ export const userRelations = relations(user, ({ many }) => ({
   invitations: many(invitation),
   assignedConversations: many(conversation),
   sentMessages: many(message),
+  reviewedKnowledgeSuggestions: many(knowledgeSuggestion),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -152,6 +153,7 @@ export const productRelations = relations(product, ({ one, many }) => ({
   widgetConfigs: many(widgetConfig),
   conversations: many(conversation),
   knowledgeSources: many(knowledgeSource),
+  knowledgeSuggestions: many(knowledgeSuggestion),
 }));
 
 export const widgetConfig = pgTable("widget_config", {
@@ -229,6 +231,7 @@ export const conversationRelations = relations(conversation, ({ one, many }) => 
     references: [user.id],
   }),
   messages: many(message),
+  knowledgeSuggestions: many(knowledgeSuggestion),
 }));
 
 export const message = pgTable("message", {
@@ -277,6 +280,56 @@ export const knowledgeSourceRelations = relations(knowledgeSource, ({ one, many 
     references: [product.id],
   }),
   chunks: many(knowledgeChunk),
+  approvedSuggestions: many(knowledgeSuggestion),
+}));
+
+export const knowledgeSuggestion = pgTable(
+  "knowledge_suggestion",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    sourceConversationId: text("source_conversation_id").references(() => conversation.id, {
+      onDelete: "set null",
+    }),
+    approvedSourceId: text("approved_source_id").references(() => knowledgeSource.id, {
+      onDelete: "set null",
+    }),
+    status: text("status").notNull().default("pending"), // "pending" | "approved" | "rejected"
+    confidence: integer("confidence").notNull().default(0),
+    question: text("question").notNull(),
+    answer: text("answer").notNull(),
+    content: text("content").notNull(),
+    reason: text("reason"),
+    reviewNote: text("review_note"),
+    reviewedById: text("reviewed_by_id").references(() => user.id, { onDelete: "set null" }),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("knowledge_suggestion_product_status_idx").on(table.productId, table.status),
+  ],
+);
+
+export const knowledgeSuggestionRelations = relations(knowledgeSuggestion, ({ one }) => ({
+  product: one(product, {
+    fields: [knowledgeSuggestion.productId],
+    references: [product.id],
+  }),
+  sourceConversation: one(conversation, {
+    fields: [knowledgeSuggestion.sourceConversationId],
+    references: [conversation.id],
+  }),
+  approvedSource: one(knowledgeSource, {
+    fields: [knowledgeSuggestion.approvedSourceId],
+    references: [knowledgeSource.id],
+  }),
+  reviewedBy: one(user, {
+    fields: [knowledgeSuggestion.reviewedById],
+    references: [user.id],
+  }),
 }));
 
 export const knowledgeChunk = pgTable("knowledge_chunk", {
