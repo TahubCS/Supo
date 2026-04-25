@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { db } from "@/db";
 import { member, product, widgetConfig } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { env } from "@/lib/env";
 
 import { WidgetConfigurator } from "./WidgetConfigurator";
 
@@ -44,7 +45,11 @@ export default async function WidgetPage({
       <h1 className="mb-8 text-3xl font-bold tracking-tight text-foreground">
         Customer widget
       </h1>
-      <WidgetConfigurator productId={id} initialConfig={initialConfig} />
+      <WidgetConfigurator
+        productId={id}
+        initialConfig={initialConfig}
+        widgetUrl={`${env.BETTER_AUTH_URL}/widget.js`}
+      />
     </div>
   );
 }

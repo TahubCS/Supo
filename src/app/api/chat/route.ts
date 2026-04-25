@@ -18,12 +18,40 @@ export const maxDuration = 60;
 // Widget runs on any customer domain — CORS must be fully open.
 const CORS: HeadersInit = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS });
+}
+
+// Returns the widget configuration (bot name, theme, etc.) to the widget JS on load.
+export async function GET(req: NextRequest) {
+  const productId = req.nextUrl.searchParams.get("productId");
+  if (!productId) {
+    return NextResponse.json({ error: "productId required" }, { status: 400, headers: CORS });
+  }
+
+  const found = await db.query.product.findFirst({
+    where: eq(product.id, productId),
+    with: { widgetConfigs: true },
+  });
+  if (!found) {
+    return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
+  }
+
+  const config = found.widgetConfigs[0];
+  return NextResponse.json(
+    {
+      botName: config?.botName ?? "Support",
+      greeting: config?.greeting ?? "Hi there! How can I help you today?",
+      position: config?.position ?? "bottom-right",
+      theme: config?.theme ?? "dark",
+      accentColor: config?.accentColor ?? "#18181b",
+    },
+    { headers: CORS },
+  );
 }
 
 type ChatRequest = {

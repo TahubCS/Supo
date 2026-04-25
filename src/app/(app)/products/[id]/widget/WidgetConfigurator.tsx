@@ -102,15 +102,20 @@ function WidgetPreview({
 interface WidgetConfiguratorProps {
   productId: string;
   initialConfig: WidgetConfigValues;
+  widgetUrl: string;
 }
+
+type IntegrationTab = "html" | "react" | "nextjs" | "vue" | "angular";
 
 export function WidgetConfigurator({
   productId,
   initialConfig,
+  widgetUrl,
 }: WidgetConfiguratorProps) {
   const [config, setConfig] = useState<WidgetConfigValues>(initialConfig);
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<IntegrationTab>("html");
   const [isPending, startTransition] = useTransition();
 
   const set = (key: keyof WidgetConfigValues, value: string) =>
@@ -124,13 +129,75 @@ export function WidgetConfigurator({
     });
   };
 
-  const embedCode = `<script>
+  const TABS: { id: IntegrationTab; label: string }[] = [
+    { id: "html",    label: "HTML" },
+    { id: "react",   label: "React" },
+    { id: "nextjs",  label: "Next.js" },
+    { id: "vue",     label: "Vue" },
+    { id: "angular", label: "Angular" },
+  ];
+
+  const snippets: Record<IntegrationTab, string> = {
+    html: `<!-- Paste before </body> on every page -->
+<script>
   window.SupoSettings = { productId: "${productId}" };
 </script>
-<script src="https://cdn.supo.app/widget.js" async></script>`;
+<script src="${widgetUrl}" async></script>`,
+
+    react: `// Add to your root component or _app.tsx
+import { useEffect } from 'react';
+
+export function SupoWidget() {
+  useEffect(() => {
+    window.SupoSettings = { productId: '${productId}' };
+    const s = document.createElement('script');
+    s.src = '${widgetUrl}';
+    s.async = true;
+    document.body.appendChild(s);
+    return () => document.body.removeChild(s);
+  }, []);
+  return null;
+}`,
+
+    nextjs: `// Add to your root layout.tsx
+import Script from 'next/script';
+
+// Inside your layout's <body>:
+<>
+  <Script id="supo-init" strategy="beforeInteractive">
+    {\`window.SupoSettings = { productId: '${productId}' };\`}
+  </Script>
+  <Script src="${widgetUrl}" strategy="lazyOnload" />
+</>`,
+
+    vue: `// In App.vue or your root component
+import { onMounted } from 'vue';
+
+onMounted(() => {
+  window.SupoSettings = { productId: '${productId}' };
+  const s = document.createElement('script');
+  s.src = '${widgetUrl}';
+  s.async = true;
+  document.body.appendChild(s);
+});`,
+
+    angular: `// In AppComponent (app.component.ts)
+import { Component, OnInit } from '@angular/core';
+
+@Component({ selector: 'app-root', templateUrl: './app.component.html' })
+export class AppComponent implements OnInit {
+  ngOnInit() {
+    (window as any).SupoSettings = { productId: '${productId}' };
+    const s = document.createElement('script');
+    s.src = '${widgetUrl}';
+    s.async = true;
+    document.body.appendChild(s);
+  }
+}`,
+  };
 
   const copyEmbed = async () => {
-    await navigator.clipboard.writeText(embedCode);
+    await navigator.clipboard.writeText(snippets[activeTab]);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -273,17 +340,34 @@ export function WidgetConfigurator({
       </div>
 
       <div>
-        <p className="mb-3 text-sm text-[color:var(--text-secondary)]">
-          Embed code
+        <p className="mb-1 text-sm font-semibold text-foreground">Integration</p>
+        <p className="mb-4 text-xs text-[color:var(--text-secondary)]">
+          Add the widget to your site — works with any framework or plain HTML.
         </p>
+
+        {/* Tab selector */}
+        <div className="mb-3 flex overflow-hidden rounded-lg border border-border">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => { setActiveTab(tab.id); setCopied(false); }}
+              className={`${segmentBase} ${activeTab === tab.id ? segmentActive : segmentInactive}`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Code block */}
         <div className="overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
             <p className="text-xs text-[color:var(--text-secondary)]">
-              Paste before the{" "}
-              <code className="rounded bg-[color:var(--card-elevated)] px-1 py-0.5 font-mono text-foreground">
-                &lt;/body&gt;
-              </code>{" "}
-              tag on every page
+              {activeTab === "html" && "Paste before the </body> tag on every page"}
+              {activeTab === "react" && "Add <SupoWidget /> to your root component or _app.tsx"}
+              {activeTab === "nextjs" && "Add to your root layout.tsx using next/script"}
+              {activeTab === "vue" && "Call from onMounted in your root App.vue"}
+              {activeTab === "angular" && "Call from ngOnInit in AppComponent"}
             </p>
             <button
               type="button"
@@ -291,20 +375,14 @@ export function WidgetConfigurator({
               className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-[color:var(--card-elevated)] hover:text-foreground"
             >
               {copied ? (
-                <>
-                  <Check className="size-3" />
-                  Copied
-                </>
+                <><Check className="size-3" />Copied</>
               ) : (
-                <>
-                  <Copy className="size-3" />
-                  Copy
-                </>
+                <><Copy className="size-3" />Copy</>
               )}
             </button>
           </div>
           <pre className="overflow-x-auto px-4 py-4 font-mono text-xs leading-relaxed text-[color:var(--text-secondary)]">
-            {embedCode}
+            {snippets[activeTab]}
           </pre>
         </div>
       </div>
