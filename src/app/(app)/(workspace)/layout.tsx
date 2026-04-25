@@ -5,7 +5,7 @@ import { CreateWorkspaceForm } from "@/components/CreateWorkspaceForm";
 import { WorkspaceSidebar } from "@/components/WorkspaceSidebar";
 import { db } from "@/db";
 import { member, organization } from "@/db/schema";
-import { isSuperAdminEmail } from "@/lib/admin";
+import { isSuperAdminEmail, isSuperAdminUserId } from "@/lib/admin";
 import { auth } from "@/lib/auth";
 
 export default async function WorkspaceLayout({
@@ -43,7 +43,11 @@ export default async function WorkspaceLayout({
         userEmail={session.user.email}
         orgName={activeOrg.name}
         emailVerified={session.user.emailVerified}
-        isAdmin={isSuperAdminEmail(session.user.email) && session.user.emailVerified}
+        isAdmin={
+          isSuperAdminEmail(session.user.email) &&
+          isSuperAdminUserId(session.user.id) &&
+          session.user.emailVerified
+        }
       />
       <main className="flex-1 overflow-auto scroll-smooth">{children}</main>
     </div>

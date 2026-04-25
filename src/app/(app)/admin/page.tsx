@@ -23,6 +23,45 @@ type UserRow = {
   name: string;
   email: string;
   email_verified: boolean;
+  role: string | null;
+  banned: boolean | null;
+  ban_reason: string | null;
+  created_at: Date;
+  workspace_count: string;
+};
+
+type ProductRow = {
+  id: string;
+  name: string;
+  organization_name: string;
+  category: string;
+  url: string | null;
+  conversation_count: string;
+  knowledge_source_count: string;
+  pending_suggestion_count: string;
+  created_at: Date;
+};
+
+type ConversationRow = {
+  id: string;
+  subject: string | null;
+  status: string;
+  product_name: string;
+  organization_name: string;
+  customer_name: string;
+  customer_email: string;
+  message_count: string;
+  last_message_at: Date;
+};
+
+type KnowledgeRow = {
+  id: string;
+  kind: "source" | "suggestion";
+  label: string;
+  status: string;
+  product_name: string;
+  organization_name: string;
+  detail: string | null;
   created_at: Date;
 };
 
@@ -33,7 +72,8 @@ function toNumber(value: string): number {
 export default async function AdminPage() {
   await requireSuperAdmin();
 
-  const [workspaceResult, userResult] = await Promise.all([
+  const [workspaceResult, userResult, productResult, conversationResult, knowledgeResult] =
+    await Promise.all([
     db.execute(sql`
       SELECT
         o.id,
@@ -58,15 +98,94 @@ export default async function AdminPage() {
       ORDER BY o.created_at DESC
     `),
     db.execute(sql`
-      SELECT id, name, email, email_verified, created_at
-      FROM "user"
+      SELECT
+        u.id,
+        u.name,
+        u.email,
+        u.email_verified,
+        u.role,
+        u.banned,
+        u.ban_reason,
+        u.created_at,
+        COUNT(DISTINCT m.organization_id)::text AS workspace_count
+      FROM "user" u
+      LEFT JOIN member m ON m.user_id = u.id
+      GROUP BY u.id, u.name, u.email, u.email_verified, u.role, u.banned, u.ban_reason, u.created_at
+      ORDER BY u.created_at DESC
+    `),
+    db.execute(sql`
+      SELECT
+        p.id,
+        p.name,
+        o.name AS organization_name,
+        p.category,
+        p.url,
+        COUNT(DISTINCT conv.id)::text AS conversation_count,
+        COUNT(DISTINCT ks.id)::text AS knowledge_source_count,
+        COUNT(DISTINCT sugg.id) FILTER (WHERE sugg.status = 'pending')::text AS pending_suggestion_count,
+        p.created_at
+      FROM product p
+      JOIN organization o ON o.id = p.organization_id
+      LEFT JOIN conversation conv ON conv.product_id = p.id
+      LEFT JOIN knowledge_source ks ON ks.product_id = p.id
+      LEFT JOIN knowledge_suggestion sugg ON sugg.product_id = p.id
+      GROUP BY p.id, p.name, o.name, p.category, p.url, p.created_at
+      ORDER BY p.created_at DESC
+    `),
+    db.execute(sql`
+      SELECT
+        conv.id,
+        conv.subject,
+        conv.status,
+        p.name AS product_name,
+        o.name AS organization_name,
+        c.name AS customer_name,
+        c.email AS customer_email,
+        COUNT(msg.id)::text AS message_count,
+        conv.last_message_at
+      FROM conversation conv
+      JOIN product p ON p.id = conv.product_id
+      JOIN organization o ON o.id = p.organization_id
+      JOIN customer c ON c.id = conv.customer_id
+      LEFT JOIN message msg ON msg.conversation_id = conv.id
+      GROUP BY conv.id, conv.subject, conv.status, p.name, o.name, c.name, c.email, conv.last_message_at
+      ORDER BY conv.last_message_at DESC
+    `),
+    db.execute(sql`
+      SELECT
+        ks.id,
+        'source' AS kind,
+        ks.name AS label,
+        ks.status,
+        p.name AS product_name,
+        o.name AS organization_name,
+        ks.type AS detail,
+        ks.created_at
+      FROM knowledge_source ks
+      JOIN product p ON p.id = ks.product_id
+      JOIN organization o ON o.id = p.organization_id
+      UNION ALL
+      SELECT
+        sugg.id,
+        'suggestion' AS kind,
+        sugg.question AS label,
+        sugg.status,
+        p.name AS product_name,
+        o.name AS organization_name,
+        sugg.kind AS detail,
+        sugg.created_at
+      FROM knowledge_suggestion sugg
+      JOIN product p ON p.id = sugg.product_id
+      JOIN organization o ON o.id = p.organization_id
       ORDER BY created_at DESC
-      LIMIT 20
     `),
   ]);
 
   const workspaces = workspaceResult.rows as WorkspaceRow[];
   const users = userResult.rows as UserRow[];
+  const products = productResult.rows as ProductRow[];
+  const conversations = conversationResult.rows as ConversationRow[];
+  const knowledgeItems = knowledgeResult.rows as KnowledgeRow[];
   const totals = workspaces.reduce(
     (acc, workspace) => ({
       workspaces: acc.workspaces + 1,
@@ -175,9 +294,9 @@ export default async function AdminPage() {
 
       <div className="mt-8 space-y-4">
         <div>
-          <p className="text-sm font-semibold text-foreground">Recent users</p>
+          <p className="text-sm font-semibold text-foreground">All users</p>
           <p className="text-xs text-[color:var(--text-secondary)]">
-            Latest accounts created through Better Auth.
+            Better Auth accounts, verification, role, ban state, and workspace membership count.
           </p>
         </div>
 
@@ -194,8 +313,108 @@ export default async function AdminPage() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3 text-xs text-[color:var(--text-tertiary)]">
+                <span>{account.role ?? "user"}</span>
+                <span>{account.banned ? "Banned" : "Active"}</span>
                 <span>{account.email_verified ? "Verified" : "Unverified"}</span>
+                <span>{account.workspace_count} workspace(s)</span>
                 <span>{new Date(account.created_at).toLocaleDateString()}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-8 grid grid-cols-1 gap-8 xl:grid-cols-2">
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">All products</p>
+            <p className="text-xs text-[color:var(--text-secondary)]">
+              Product-level footprint across every workspace.
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {products.map((item) => (
+              <div key={item.id} className="border-b border-border px-4 py-3 last:border-b-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{item.name}</p>
+                    <p className="truncate text-xs text-[color:var(--text-secondary)]">
+                      {item.organization_name}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-[color:var(--text-secondary)]">
+                    {item.category}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-[color:var(--text-tertiary)]">
+                  <span>{item.conversation_count} conversations</span>
+                  <span>{item.knowledge_source_count} sources</span>
+                  <span>{item.pending_suggestion_count} pending KB</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">All conversations</p>
+            <p className="text-xs text-[color:var(--text-secondary)]">
+              Latest support activity across every product.
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-lg border border-border bg-card">
+            {conversations.map((item) => (
+              <div key={item.id} className="border-b border-border px-4 py-3 last:border-b-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {item.subject ?? "Untitled conversation"}
+                    </p>
+                    <p className="truncate text-xs text-[color:var(--text-secondary)]">
+                      {item.customer_name} ({item.customer_email})
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-[color:var(--text-secondary)]">
+                    {item.status}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-[color:var(--text-tertiary)]">
+                  <span>{item.organization_name}</span>
+                  <span>{item.product_name}</span>
+                  <span>{item.message_count} messages</span>
+                  <span>{new Date(item.last_message_at).toLocaleDateString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-8 space-y-4">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Knowledge activity</p>
+          <p className="text-xs text-[color:var(--text-secondary)]">
+            Sources and review suggestions across every product.
+          </p>
+        </div>
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
+          {knowledgeItems.map((item) => (
+            <div
+              key={`${item.kind}-${item.id}`}
+              className="flex items-start justify-between gap-4 border-b border-border px-4 py-3 last:border-b-0"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
+                <p className="truncate text-xs text-[color:var(--text-secondary)]">
+                  {item.organization_name} / {item.product_name}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3 text-xs text-[color:var(--text-tertiary)]">
+                <span>{item.kind}</span>
+                <span>{item.detail}</span>
+                <span>{item.status}</span>
+                <span>{new Date(item.created_at).toLocaleDateString()}</span>
               </div>
             </div>
           ))}

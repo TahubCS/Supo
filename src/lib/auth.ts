@@ -1,19 +1,24 @@
 import { dash } from "@better-auth/infra";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { organization } from "better-auth/plugins";
+import { admin, organization } from "better-auth/plugins";
 import { Resend } from "resend";
 
 import { db } from "@/db";
+import { BETTER_AUTH_ADMIN_USER_IDS } from "@/lib/admin";
 import { env } from "@/lib/env";
 
 const resend = new Resend(env.RESEND_API_KEY);
+const trustedOrigins =
+  process.env.NODE_ENV === "production"
+    ? [env.BETTER_AUTH_URL]
+    : [env.BETTER_AUTH_URL, "http://localhost:3000"];
 
 export const auth = betterAuth({
   appName: "Supo",
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
-  trustedOrigins: [env.BETTER_AUTH_URL, "http://localhost:3000"],
+  trustedOrigins,
   database: drizzleAdapter(db, {
     provider: "pg",
   }),
@@ -66,6 +71,10 @@ export const auth = betterAuth({
     },
   },
   plugins: [
+    admin({
+      adminUserIds: BETTER_AUTH_ADMIN_USER_IDS,
+      impersonationSessionDuration: 60 * 60,
+    }),
     organization(),
     dash({
       apiKey: env.BETTER_AUTH_API_KEY,
