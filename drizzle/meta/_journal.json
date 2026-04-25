@@ -64,6 +64,13 @@
       "when": 1777248000000,
       "tag": "0008_better_auth_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777334400000,
+      "tag": "0009_admin_audit_log",
+      "breakpoints": true
     }
   ]
 }

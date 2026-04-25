@@ -128,7 +128,7 @@ This is the workspace management surface.
 - Current tables in `src/db/schema.ts`:
   - Better Auth core: `user`, `session`, `account`, `verification`
   - Organization plugin: `organization`, `member`, `invitation`
-  - App-owned: `product`, `widget_config`, `customer`, `conversation`, `message`, `knowledge_source`, `knowledge_suggestion`, `knowledge_chunk`
+  - App-owned: `product`, `widget_config`, `customer`, `conversation`, `message`, `knowledge_source`, `knowledge_suggestion`, `knowledge_chunk`, `admin_audit_log`
 - `product` is the first app-owned table. It belongs to an `organization` and is the unit around which knowledge, conversations, widget config, and analytics are scoped.
 - `widget_config` is scoped to `product_id` (one-to-one), not `organization_id`. Do not revert this — widget config is per-product, not per-workspace.
 - The `organization` table is the tenant anchor. Do not reintroduce a separate `workspaces` table — the earlier placeholder was dropped on purpose.
@@ -158,7 +158,11 @@ This is the workspace management surface.
 - `experimental.joins: true` is enabled for relational query performance.
 - `requireEmailVerification: false` is currently set — email verification flow is fully implemented with Resend but deliberately disabled until a verified sending domain is configured. Flip this to `true` and add the domain to re-enable it.
 - Transactional email (verification, password reset) uses `Resend` via `onboarding@resend.dev`. This sender only delivers to the Resend account owner's email without a verified domain. The `RESEND_API_KEY` env var is required.
-- Super-admin access is separate from workspace membership. `/admin` is read-only and requires a signed-in user whose email is in `SUPO_SUPER_ADMIN_EMAILS`, whose id is in `BETTER_AUTH_ADMIN_USER_IDS`, and whose `emailVerified` flag is true. Do not grant admin privileges from unverified email alone while public signup is enabled.
+- Super-admin access is separate from workspace membership. `/admin` requires a signed-in user whose email is in `SUPO_SUPER_ADMIN_EMAILS`, whose id is in `BETTER_AUTH_ADMIN_USER_IDS`, and whose `emailVerified` flag is true. Do not grant admin privileges from unverified email alone while public signup is enabled.
+- `/admin` provides read-first global visibility plus guarded non-destructive controls: view sessions, revoke sessions, and ban/unban users. Do not add delete-user or impersonation controls unless explicitly requested.
+- Admin impersonation is intentionally disabled for security. Better Auth Admin is configured with a custom access-control role that omits `user.impersonate`, and Supo admin server actions do not expose impersonation.
+- Admin actions in `src/app/(app)/admin/actions.ts` must use the server-side `requireSuperAdmin()` guard, must never target the configured super-admin account, and must write `admin_audit_log` rows for high-risk actions.
+- Public auth/chat rate limiting lives in `src/proxy.ts`. It prefers `x-vercel-forwarded-for` before `x-forwarded-for`; production requires `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` or requests fail closed with a clear 503. Local development fails open.
 - Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`, `GOOGLE_GEMINI_API_KEY`, `SUPO_SUPER_ADMIN_EMAILS`, `BETTER_AUTH_ADMIN_USER_IDS`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
 
 ### Storage
@@ -167,8 +171,9 @@ This is the workspace management surface.
 
 ### Cache / Queue
 
-- Add `Upstash Redis` only if needed for rate limiting, caching, jobs, or event buffering
-- Do not introduce Redis before there is a clear product or performance need
+- `Upstash Redis` is used by `src/proxy.ts` for public `/api/chat` and auth endpoint rate limiting.
+- Production must set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`; local development fails open when they are absent.
+- Add more Redis usage only if needed for caching, jobs, or event buffering.
 
 ## App Structure
 
@@ -189,7 +194,9 @@ src/app/
       settings/
         page.tsx                        ← workspace settings (account, team, billing)
     admin/
-      page.tsx                          ← verified super-admin read-only DB overview for all workspaces/users
+      page.tsx                          ← verified super-admin DB overview for all workspaces/users with guarded session/ban controls
+      actions.ts                        ← env-gated Supo admin actions + audit logging
+      AdminUserActions.tsx              ← client controls for sessions and ban/unban
     products/
       [id]/
         layout.tsx                      ← verifies product ownership + ProductSidebar
@@ -351,6 +358,7 @@ App-owned tables currently in `src/db/schema.ts`:
 - `knowledge_source` — product-scoped. A single knowledge source. Columns: `id`, `product_id`, `type` (article/url/github/conversation/sitemap), `name`, `url`, `content`, `status` (pending/indexing/indexed/error), `error_message`, `chunk_count`, `content_hash` (SHA-256 of last fetched content for change detection), `last_checked_at` (last time content was fetched and compared by cron), `created_at`, `updated_at`. The `"sitemap"` type is auto-created when a product is created with a URL — it crawls multiple pages discovered via sitemap.xml.
 - `knowledge_suggestion` — product-scoped. Review queue for proposed KB updates generated from support conversations and missing-knowledge detection. Columns: `id`, `product_id`, `source_conversation_id`, `approved_source_id`, `status` (pending/approved/rejected), `kind` (faq/gap), `confidence`, `question`, nullable `answer`, nullable `content`, `reason`, `review_note`, `reviewed_by_id`, `reviewed_at`, `created_at`, `updated_at`. FAQ suggestions must include real answer/content. Gap suggestions intentionally start without answer/content and cannot be approved until a reviewer saves a real answer. Approval creates and links a `knowledge_source`; rejection preserves the draft and audit state.
 - `knowledge_chunk` — source-scoped (denormalized `product_id` for fast search). Stores one text chunk with its pgvector embedding. Columns: `id`, `source_id`, `product_id`, `content`, `embedding` (vector(768)), `metadata` (JSON: title/url/chunkIndex), `created_at`. Has an HNSW index on `embedding` using cosine distance.
+- `admin_audit_log` — super-admin audit trail. Columns: `id`, `admin_user_id`, `target_user_id`, `target_organization_id`, `action`, `metadata`, `ip_address`, `user_agent`, `created_at`. Admin actions must write this table for session revocation, ban, unban, and other high-risk operations.
 
 ### Tenancy model
 
@@ -388,7 +396,7 @@ Every app-owned table must:
 - When schema files change, generate and apply migrations in the same body of work when feasible.
 - If the database layer changes materially, update `AGENTS.md` to reflect the new source-of-truth files and commands.
 - `bun run db:generate` requires a TTY to resolve column rename conflicts interactively. If running in a non-TTY environment (CI, agent shells), write the migration SQL and snapshot manually and record the hash in `drizzle.__drizzle_migrations` after applying it.
-- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue), `0007_knowledge_gap_suggestions` (gap kind + nullable answer/content for missing-knowledge review), `0008_better_auth_admin` (Better Auth Admin plugin fields).
+- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue), `0007_knowledge_gap_suggestions` (gap kind + nullable answer/content for missing-knowledge review), `0008_better_auth_admin` (Better Auth Admin plugin fields), `0009_admin_audit_log` (super-admin action audit trail).
 
 ## Theme Rules
 
