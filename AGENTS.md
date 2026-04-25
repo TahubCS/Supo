@@ -158,6 +158,7 @@ This is the workspace management surface.
 - `experimental.joins: true` is enabled for relational query performance.
 - `requireEmailVerification: false` is currently set — email verification flow is fully implemented with Resend but deliberately disabled until a verified sending domain is configured. Flip this to `true` and add the domain to re-enable it.
 - Transactional email (verification, password reset) uses `Resend` via `onboarding@resend.dev`. This sender only delivers to the Resend account owner's email without a verified domain. The `RESEND_API_KEY` env var is required.
+- Super-admin access is separate from workspace membership. `/admin` is read-only and requires a signed-in user whose email is in `src/lib/admin.ts` and whose `emailVerified` flag is true. Do not grant admin privileges from unverified email alone while public signup is enabled.
 - Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`, `GOOGLE_GEMINI_API_KEY`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
 
 ### Storage
@@ -187,6 +188,8 @@ src/app/
         NewProductDialog.tsx            ← client dialog for creating a product
       settings/
         page.tsx                        ← workspace settings (account, team, billing)
+    admin/
+      page.tsx                          ← verified super-admin read-only DB overview for all workspaces/users
     products/
       [id]/
         layout.tsx                      ← verifies product ownership + ProductSidebar
@@ -204,7 +207,6 @@ src/app/
         knowledge/
           page.tsx                        ← server component: fetches knowledge sources + pending suggestions, renders KnowledgeBase
           KnowledgeBase.tsx               ← client orchestrator: SuggestionList + SourceList + AddSourceDialog + TestQueryPanel
-          SuggestionList.tsx              ← pending suggestion cards, detail dialog, approve/reject controls
           SourceList.tsx                  ← grid of source cards with status badges, re-index, delete
           SuggestionList.tsx              ← pending FAQ/gap review cards with answer editor and approve/reject controls
           AddSourceDialog.tsx             ← dialog: Article / URL / GitHub segmented type selector
@@ -241,6 +243,8 @@ src/db/
   schema.ts                             ← all table definitions and relations
 
 src/lib/
+  admin.ts                              ← super-admin email allowlist
+  admin-server.ts                       ← server-side super-admin session guard
   auth.ts                               ← Better Auth server config
   auth-client.ts                        ← Better Auth browser client
   env.ts                                ← validated env vars

@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, LogOut, MessageCircle, Settings } from "lucide-react";
+import { LayoutDashboard, LogOut, MessageCircle, Settings, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -11,6 +11,7 @@ interface WorkspaceSidebarProps {
   userEmail: string;
   orgName: string;
   emailVerified: boolean;
+  isAdmin?: boolean;
 }
 
 export function WorkspaceSidebar({
@@ -18,6 +19,7 @@ export function WorkspaceSidebar({
   userEmail,
   orgName,
   emailVerified,
+  isAdmin = false,
 }: WorkspaceSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -69,6 +71,19 @@ export function WorkspaceSidebar({
           <LayoutDashboard className="size-4 shrink-0" />
           Products
         </Link>
+        {isAdmin ? (
+          <Link
+            href="/admin"
+            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors duration-150 ${
+              isActive("/admin")
+                ? "bg-[color:var(--card-elevated)] text-foreground"
+                : "text-[color:var(--text-secondary)] hover:bg-[color:var(--card-elevated)] hover:text-foreground"
+            }`}
+          >
+            <ShieldCheck className="size-4 shrink-0" />
+            Admin
+          </Link>
+        ) : null}
       </nav>
 
       <div className="border-t border-border p-2">
