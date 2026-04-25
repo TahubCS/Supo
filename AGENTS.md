@@ -149,17 +149,17 @@ This is the workspace management surface.
 - Keep auth decoupled from the database provider
 - Current auth server entrypoint is `src/lib/auth.ts`
 - Current auth client entrypoint is `src/lib/auth-client.ts`
-- Current Better Auth setup uses the Drizzle adapter with `emailAndPassword` enabled and social providers for Google and GitHub. Microsoft (Entra ID) is deferred until the user decides to configure the Azure app — the plumbing is structured so adding it is a two-field change in `auth.ts` + two env vars.
+- Current Better Auth setup uses the Drizzle adapter with `emailAndPassword` enabled, Better Auth Admin plugin, and social providers for Google and GitHub. Microsoft (Entra ID) is deferred until the user decides to configure the Azure app — the plumbing is structured so adding it is a two-field change in `auth.ts` + two env vars.
 - The `organization` plugin is enabled on both server (`organization()`) and client (`organizationClient()`) — this is how Supo represents tenants, teams, roles, and invitations. Do not rebuild membership/invitation tables by hand.
-- `trustedOrigins` is set to `[BETTER_AUTH_URL, "http://localhost:3000"]`. Any new deployed host must be added to this list.
+- `trustedOrigins` is `[BETTER_AUTH_URL]` in production and `[BETTER_AUTH_URL, "http://localhost:3000"]` outside production. Any new deployed host must be added intentionally.
 - Current Better Auth Infrastructure integration uses the `dash()` plugin.
 - `appName: "Supo"` is set in the auth config.
 - `advanced.ipAddress.ipAddressHeaders: ["x-vercel-forwarded-for", "x-forwarded-for"]` is set for correct IP detection on Vercel.
 - `experimental.joins: true` is enabled for relational query performance.
 - `requireEmailVerification: false` is currently set — email verification flow is fully implemented with Resend but deliberately disabled until a verified sending domain is configured. Flip this to `true` and add the domain to re-enable it.
 - Transactional email (verification, password reset) uses `Resend` via `onboarding@resend.dev`. This sender only delivers to the Resend account owner's email without a verified domain. The `RESEND_API_KEY` env var is required.
-- Super-admin access is separate from workspace membership. `/admin` is read-only and requires a signed-in user whose email is in `src/lib/admin.ts` and whose `emailVerified` flag is true. Do not grant admin privileges from unverified email alone while public signup is enabled.
-- Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`, `GOOGLE_GEMINI_API_KEY`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
+- Super-admin access is separate from workspace membership. `/admin` is read-only and requires a signed-in user whose email is in `SUPO_SUPER_ADMIN_EMAILS`, whose id is in `BETTER_AUTH_ADMIN_USER_IDS`, and whose `emailVerified` flag is true. Do not grant admin privileges from unverified email alone while public signup is enabled.
+- Required env vars: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `BETTER_AUTH_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `RESEND_API_KEY`, `GOOGLE_GEMINI_API_KEY`, `SUPO_SUPER_ADMIN_EMAILS`, `BETTER_AUTH_ADMIN_USER_IDS`. `src/lib/env.ts` validates at import time — do not add optional unvalidated env access elsewhere.
 
 ### Storage
 
@@ -333,8 +333,8 @@ src/styles/
 
 The Better Auth tables live in `src/db/schema.ts` and are the source of truth for identity and tenancy:
 
-- `user` — identity (from Better Auth core)
-- `session` — active sessions (from Better Auth core)
+- `user` — identity (from Better Auth core, extended by the Admin plugin with `role`, `banned`, `ban_reason`, and `ban_expires`)
+- `session` — active sessions (from Better Auth core, extended by the Admin plugin with `impersonated_by`)
 - `account` — credential rows (password hash or OAuth tokens, one per provider per user)
 - `verification` — email verification and password reset tokens
 - `organization` — tenant (the Supo "workspace" concept lives here)
@@ -388,7 +388,7 @@ Every app-owned table must:
 - When schema files change, generate and apply migrations in the same body of work when feasible.
 - If the database layer changes materially, update `AGENTS.md` to reflect the new source-of-truth files and commands.
 - `bun run db:generate` requires a TTY to resolve column rename conflicts interactively. If running in a non-TTY environment (CI, agent shells), write the migration SQL and snapshot manually and record the hash in `drizzle.__drizzle_migrations` after applying it.
-- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue), `0007_knowledge_gap_suggestions` (gap kind + nullable answer/content for missing-knowledge review).
+- Applied migrations: `0000_loving_gambit` (Better Auth tables), `0001_simple_sally_floyd` (widget_config with org_id), `0002_products_architecture` (product table + widget_config → product_id), `0003_inbox_tables` (customer, conversation, message tables), `0004_knowledge_base` (knowledge_source + knowledge_chunk tables, product.embedding_model column, pgvector extension + HNSW index), `0005_auto_sync` (content_hash + last_checked_at columns on knowledge_source), `0006_knowledge_suggestions` (knowledge_suggestion review queue), `0007_knowledge_gap_suggestions` (gap kind + nullable answer/content for missing-knowledge review), `0008_better_auth_admin` (Better Auth Admin plugin fields).
 
 ## Theme Rules
 

@@ -57,6 +57,13 @@
       "when": 1777161600000,
       "tag": "0007_knowledge_gap_suggestions",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1777248000000,
+      "tag": "0008_better_auth_admin",
+      "breakpoints": true
     }
   ]
 }
