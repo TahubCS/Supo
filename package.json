@@ -48,6 +48,7 @@
     "@radix-ui/react-tooltip": "1.1.8",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
+    "ably": "^2.21.0",
     "ai": "^6.0.168",
     "better-auth": "1.6.9",
     "canvas-confetti": "1.9.4",
