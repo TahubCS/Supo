@@ -26,7 +26,7 @@ const CORS: HeadersInit = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Expose-Headers": "x-conversation-id, x-sources",
+  "Access-Control-Expose-Headers": "x-conversation-id, x-sources, x-escalation-status",
 };
 // Cap widget messages to limit abuse and keep prompt size bounded.
 const MAX_WIDGET_MESSAGE_LENGTH = 2000;

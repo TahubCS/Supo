@@ -131,9 +131,9 @@
       .then(function (data) {
         if (data && (data.escalationStatus === 'pending' || data.escalationStatus === 'active')) {
           widgetState = data.escalationStatus === 'active' ? 'agent_active' : 'waiting_agent';
-          lastSeenAt  = new Date().toISOString();
           messages.push({ role: 'system', text: 'Connecting you to an agent…' });
           render();
+          doPoll();
           startPolling();
         }
       })
@@ -574,7 +574,7 @@
       if (escStatus === 'pending' || escStatus === 'active') {
         messages[messages.length - 1] = { role: 'system', text: 'An agent will be with you shortly.' };
         widgetState = escStatus === 'active' ? 'agent_active' : 'waiting_agent';
-        if (!lastSeenAt) lastSeenAt = new Date().toISOString();
+        doPoll();
         startPolling();
         render();
         return;
@@ -619,6 +619,51 @@
     });
   }
 
+  // ── Restore conversation on page load ───────────────────────────────────
+  // Fetches full message history and escalation state so a page refresh
+  // never loses an in-progress conversation or agent session.
+  function restoreConversation() {
+    var customer = getCustomer();
+    var convId   = getConvId(customer);
+    if (!customer || !convId) return;
+
+    var url = API_POLL
+      + '?conversationId=' + encodeURIComponent(convId)
+      + '&productId='      + encodeURIComponent(productId)
+      + '&since='          + encodeURIComponent(new Date(0).toISOString());
+
+    fetch(url)
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+
+        if (data.messages && data.messages.length > 0) {
+          messages = [];
+          data.messages.forEach(function (m) {
+            if (m.senderType === 'customer') {
+              messages.push({ role: 'user', text: m.body });
+            } else if (m.senderType === 'ai') {
+              messages.push({ role: 'ai', text: m.body });
+            } else if (m.senderType === 'agent') {
+              messages.push({ role: 'agent', text: m.body });
+            }
+          });
+          lastSeenAt = data.messages[data.messages.length - 1].createdAt;
+        }
+
+        if (data.escalationStatus === 'pending') {
+          widgetState = 'waiting_agent';
+          startPolling();
+        } else if (data.escalationStatus === 'active') {
+          widgetState = 'agent_active';
+          startPolling();
+        }
+
+        render();
+      })
+      .catch(function () { /* silent — initial render already shown */ });
+  }
+
   // ── Init ─────────────────────────────────────────────────────────────────
   function init() {
     fetch(API_CONFIG)
@@ -626,6 +671,7 @@
       .then(function (data) {
         cfg = Object.assign(cfg, data);
         render();
+        restoreConversation();
       })
       .catch(function () {
         render();
