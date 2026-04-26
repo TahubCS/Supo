@@ -18,7 +18,8 @@ type QuotaName =
   | "knowledge.test.product.day"
   | "knowledge.source.user.day"
   | "knowledge.source.organization.day"
-  | "inbox.agent.user.hour";
+  | "inbox.agent.user.hour"
+  | "chat.escalate.conversation";
 
 type QuotaConfig = {
   limit: number;
@@ -57,6 +58,7 @@ const quotaConfigs: Record<QuotaName, QuotaConfig> = {
   "knowledge.source.user.day": { limit: 20, window: "1 d" },
   "knowledge.source.organization.day": { limit: 50, window: "1 d" },
   "inbox.agent.user.hour": { limit: 120, window: "1 h" },
+  "chat.escalate.conversation": { limit: 5, window: "1 h" },
 };
 const quotaLimiters = new Map<QuotaName, Ratelimit>();
 
