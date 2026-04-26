@@ -64,7 +64,10 @@ export async function GET(req: NextRequest) {
     }
 
     const channelName = conversationChannelName(orgId, conversationId);
-    const tokenRequest = await createTokenRequest({ [channelName]: ["subscribe"] });
+    const tokenRequest = await createTokenRequest(
+      { [channelName]: ["subscribe"] },
+      `widget:${conversationId}`,
+    );
 
     if (!tokenRequest) {
       return NextResponse.json(
@@ -98,7 +101,7 @@ export async function GET(req: NextRequest) {
     [`org:${orgId}:conversation:*`]: ["subscribe"],
   };
 
-  const tokenRequest = await createTokenRequest(capability);
+  const tokenRequest = await createTokenRequest(capability, `agent:${session.user.id}`);
 
   if (!tokenRequest) {
     return NextResponse.json({ error: "Realtime not configured" }, { status: 503 });

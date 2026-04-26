@@ -157,8 +157,14 @@ export function ConversationThread({
       });
     }
 
-    ch.subscribe("message", onMessage);
-    return () => ch.unsubscribe("message", onMessage);
+    void Promise.resolve(ch.subscribe("message", onMessage)).catch(() => {});
+    return () => {
+      try {
+        ch.unsubscribe("message", onMessage);
+      } catch {
+        // Channel may already be detached during Fast Refresh.
+      }
+    };
   }, [ablyClient, conversationId, orgId]);
 
   if (!conversation) {

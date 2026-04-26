@@ -4,6 +4,12 @@ import { env } from "@/lib/env";
 
 let _rest: Ably.Rest | null = null;
 
+type PresenceGetResult =
+  | Ably.PresenceMessage[]
+  | {
+      items?: Ably.PresenceMessage[];
+    };
+
 function getRestClient(): Ably.Rest | null {
   if (!env.ABLY_API_KEY) return null;
   if (!_rest) _rest = new Ably.Rest(env.ABLY_API_KEY);
@@ -57,10 +63,9 @@ export async function getPresenceCount(orgId: string, productId: string): Promis
   const rest = getRestClient();
   if (!rest) return 0;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = (await rest.channels
       .get(presenceChannelName(orgId, productId))
-      .presence.get()) as any;
+      .presence.get()) as PresenceGetResult;
     // REST presence.get() returns PresenceMessage[] in practice; handle both shapes.
     return Array.isArray(result) ? result.length : (result?.items?.length ?? 0);
   } catch {
@@ -72,12 +77,14 @@ export async function getPresenceCount(orgId: string, productId: string): Promis
 // The token is scoped to exactly the channels the caller needs.
 export async function createTokenRequest(
   capability: Record<string, string[]>,
+  clientId: string,
 ): Promise<Ably.TokenRequest | null> {
   const rest = getRestClient();
   if (!rest) return null;
   // Ably SDK accepts capability as a JSON string; this avoids SDK type narrowing issues.
   return rest.auth.createTokenRequest({
     capability: JSON.stringify(capability),
+    clientId,
     ttl: 3_600_000, // 1 hour
   });
 }
