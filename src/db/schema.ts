@@ -298,6 +298,8 @@ export const conversation = pgTable("conversation", {
     onDelete: "set null",
   }),
   aiHandled: boolean("ai_handled").notNull().default(true),
+  escalationStatus: text("escalation_status"), // null | "pending" | "active"
+  escalatedAt: timestamp("escalated_at"),
   subject: text("subject"),
   lastMessageAt: timestamp("last_message_at").notNull(),
   createdAt: timestamp("created_at").notNull(),
