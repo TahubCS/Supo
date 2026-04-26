@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { conversation, customer, product } from "@/db/schema";
+import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import {
   isSecurityQuotaError,
   requireSecurityQuota,
@@ -110,6 +111,19 @@ export async function POST(req: NextRequest) {
       updatedAt: now,
     })
     .where(eq(conversation.id, conv.id));
+
+  // Publish real-time events — fire-and-forget; never block the API response.
+  Promise.allSettled([
+    publishToConversation(foundProduct.organizationId, conv.id, "escalation_update", {
+      status: "pending",
+    }),
+    publishToProductInbox(foundProduct.organizationId, productId, "needs_agent", {
+      conversationId: conv.id,
+      subject: conv.subject,
+      customerName: cust.name,
+      escalatedAt: now.toISOString(),
+    }),
+  ]).catch(() => {});
 
   return NextResponse.json({ ok: true, escalationStatus: "pending" }, { headers: CORS });
 }

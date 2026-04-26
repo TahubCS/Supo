@@ -51,5 +51,12 @@ export default async function InboxPage({
     }),
   );
 
-  return <InboxView conversations={withMessages} />;
+  return (
+    <InboxView
+      conversations={withMessages}
+      productId={id}
+      orgId={foundProduct.organizationId}
+      userName={session.user.name}
+    />
+  );
 }

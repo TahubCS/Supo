@@ -11,6 +11,7 @@ import {
   product,
 } from "@/db/schema";
 import { env } from "@/lib/env";
+import { publishToConversation } from "@/lib/ably";
 import { geminiEmbed, resolveGenerationModel } from "@/lib/knowledge/ai";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
 import {
@@ -403,14 +404,16 @@ export async function POST(req: NextRequest) {
   const modelId = await resolveGenerationModel();
 
   const convId = conv.id;
+  const orgId = foundProduct.organizationId;
   const result = streamText({
     model: google(modelId),
     system: systemLines,
     messages: chatMessages,
     onFinish: async ({ text }) => {
       const finishAt = new Date();
+      const newMsgId = crypto.randomUUID();
       await db.insert(message).values({
-        id: crypto.randomUUID(),
+        id: newMsgId,
         conversationId: convId,
         body: text,
         senderType: "ai",
@@ -421,6 +424,13 @@ export async function POST(req: NextRequest) {
         .update(conversation)
         .set({ lastMessageAt: finishAt, updatedAt: finishAt, aiHandled: true })
         .where(eq(conversation.id, convId));
+      // Push AI reply to any agent viewing this conversation in real-time.
+      publishToConversation(orgId, convId, "message", {
+        id: newMsgId,
+        body: text,
+        senderType: "ai",
+        createdAt: finishAt.toISOString(),
+      }).catch(() => {});
     },
   });
 

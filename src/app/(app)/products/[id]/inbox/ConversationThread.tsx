@@ -1,5 +1,6 @@
 "use client";
 
+import * as Ably from "ably";
 import { format, isSameDay } from "date-fns";
 import { BookOpen, MessageSquare } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -84,8 +85,12 @@ function MessageBubble({ msg }: { msg: MessageRow }) {
 
 export function ConversationThread({
   conversation,
+  ablyClient,
+  orgId,
 }: {
   conversation: ConversationWithDetails | null;
+  ablyClient: Ably.Realtime | null;
+  orgId: string;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>([]);
@@ -122,6 +127,39 @@ export function ConversationThread({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Subscribe to real-time messages on the conversation channel.
+  useEffect(() => {
+    if (!ablyClient || !conversationId) return;
+    const ch = ablyClient.channels.get(`org:${orgId}:conversation:${conversationId}`);
+
+    function onMessage(msg: Ably.Message) {
+      const d = msg.data as {
+        id: string;
+        body: string;
+        senderType: string;
+        createdAt: string;
+      };
+      setMessages((prev) => {
+        // Dedup: the sender already has this message from getMessages() refetch.
+        if (prev.some((m) => m.id === d.id)) return prev;
+        return [
+          ...prev,
+          {
+            id: d.id,
+            conversationId: conversationId!,
+            body: d.body,
+            senderType: d.senderType,
+            senderId: null,
+            createdAt: new Date(d.createdAt),
+          },
+        ];
+      });
+    }
+
+    ch.subscribe("message", onMessage);
+    return () => ch.unsubscribe("message", onMessage);
+  }, [ablyClient, conversationId, orgId]);
 
   if (!conversation) {
     return (

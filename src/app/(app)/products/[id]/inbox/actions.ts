@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 
 import { db } from "@/db";
 import { conversation, knowledgeSuggestion, member, message } from "@/db/schema";
+import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import { auth } from "@/lib/auth";
 import { geminiGenerate } from "@/lib/knowledge/ai";
 import { requireSecurityQuota } from "@/lib/security";
@@ -63,12 +64,19 @@ export async function getMessages(conversationId: string): Promise<MessageRow[]>
 }
 
 export async function resolveConversation(conversationId: string): Promise<void> {
-  await verifyConversationAccess(conversationId);
+  const { conv, membership } = await verifyConversationAccess(conversationId);
   const now = new Date();
   await db
     .update(conversation)
     .set({ status: "resolved", escalationStatus: null, updatedAt: now })
     .where(eq(conversation.id, conversationId));
+
+  // Push real-time update to agent inbox — fire-and-forget.
+  publishToProductInbox(membership.organizationId, conv.productId, "conversation_updated", {
+    conversationId,
+    status: "resolved",
+    escalationStatus: null,
+  }).catch(() => {});
 
   try {
     await createKnowledgeSuggestionFromConversation(conversationId);
@@ -110,9 +118,10 @@ export async function sendMessage(
     method: "POST",
   });
   const now = new Date();
+  const newMsgId = crypto.randomUUID();
 
   await db.insert(message).values({
-    id: crypto.randomUUID(),
+    id: newMsgId,
     conversationId,
     body,
     senderType: "agent",
@@ -131,6 +140,25 @@ export async function sendMessage(
       assigneeId: session.user.id,
     })
     .where(eq(conversation.id, conversationId));
+
+  // Publish real-time events to widget and any other agents viewing this thread.
+  Promise.allSettled([
+    publishToConversation(membership.organizationId, conversationId, "message", {
+      id: newMsgId,
+      body,
+      senderType: "agent",
+      senderName: session.user.name,
+      createdAt: now.toISOString(),
+    }),
+    publishToConversation(membership.organizationId, conversationId, "escalation_update", {
+      status: "active",
+    }),
+    publishToProductInbox(membership.organizationId, conv.productId, "conversation_updated", {
+      conversationId,
+      escalationStatus: "active",
+      status: "open",
+    }),
+  ]).catch(() => {});
 }
 
 function clampConfidence(value: unknown): number {

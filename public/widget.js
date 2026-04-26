@@ -14,10 +14,11 @@
   var scriptEl = document.currentScript;
   var API_ORIGIN = settings.apiUrl
     || (scriptEl ? new URL(scriptEl.src).origin : location.origin);
-  var API_CONFIG   = API_ORIGIN + '/api/chat?productId=' + encodeURIComponent(productId);
-  var API_CHAT     = API_ORIGIN + '/api/chat';
-  var API_ESCALATE = API_ORIGIN + '/api/chat/escalate';
-  var API_POLL     = API_ORIGIN + '/api/messages/poll';
+  var API_CONFIG    = API_ORIGIN + '/api/chat?productId=' + encodeURIComponent(productId);
+  var API_CHAT      = API_ORIGIN + '/api/chat';
+  var API_ESCALATE  = API_ORIGIN + '/api/chat/escalate';
+  var API_POLL      = API_ORIGIN + '/api/messages/poll';
+  var API_ABLY_TOKEN = API_ORIGIN + '/api/ably/token';
 
   // ── Persistence ──────────────────────────────────────────────────────────
   var CONV_KEY = 'supo_conv_' + productId;
@@ -114,6 +115,104 @@
         }
       })
       .catch(function () { /* network hiccup — retry next tick */ });
+  }
+
+  // ── Ably real-time ───────────────────────────────────────────────────────
+  var ablyClient   = null;
+  var ablyConvId   = null; // conversation ID currently subscribed to
+
+  // Lazily loads the Ably CDN bundle, then calls callback().
+  // Falls back to polling if the CDN is unreachable.
+  function loadAblySDK(callback) {
+    if (window.Ably) { callback(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://cdn.ably.com/lib/ably.min-2.js';
+    s.onload = callback;
+    s.onerror = function () { startPolling(); };
+    document.head.appendChild(s);
+  }
+
+  // Subscribes the widget to its conversation channel via Ably WebSocket.
+  // Called once we have a convId (from x-conversation-id header or restoreConversation).
+  // Polling remains active as the fallback until Ably connects.
+  function subscribeToConversation(convId) {
+    if (ablyConvId === convId) return; // already subscribed
+    ablyConvId = convId;
+
+    loadAblySDK(function () {
+      var tokenUrl = API_ABLY_TOKEN
+        + '?conversationId=' + encodeURIComponent(convId)
+        + '&productId='      + encodeURIComponent(productId);
+
+      try {
+        if (ablyClient) { ablyClient.close(); }
+        ablyClient = new window.Ably.Realtime({ authUrl: tokenUrl, authMethod: 'GET' });
+
+        ablyClient.connection.on('connected', function () {
+          stopPolling(); // Ably is up — stop the polling fallback
+        });
+
+        ablyClient.connection.on('failed', function () {
+          startPolling(); // Hard fail — fall back to polling
+        });
+
+        ablyClient.connection.on('suspended', function () {
+          startPolling(); // Lost connection briefly — resume polling while reconnecting
+        });
+
+        ablyClient.connection.on('connected', function () {
+          stopPolling(); // Reconnected — stop polling again
+        });
+
+        ablyClient.channels.get(/* channelName from token */ '').then
+          ? void 0 // no-op; channel name comes from token response below
+          : void 0;
+
+        // The token endpoint returns channelName so the widget never has to know orgId.
+        fetch(tokenUrl)
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) {
+            if (!data || !data.channelName) { startPolling(); return; }
+            var ch = ablyClient.channels.get(data.channelName);
+
+            ch.subscribe('message', function (msg) {
+              var d = msg.data;
+              if (d.senderType === 'agent') {
+                setMessages(function (prev) {
+                  if (prev.some(function (m) { return m.text === d.body && m.role === 'agent'; })) return prev;
+                  return prev.concat([{ role: 'agent', text: d.body }]);
+                });
+                if (widgetState === 'waiting_agent') { widgetState = 'agent_active'; }
+                render();
+              }
+            });
+
+            ch.subscribe('escalation_update', function (msg) {
+              var s = msg.data.status;
+              if (s === 'pending')  { widgetState = 'waiting_agent'; render(); }
+              if (s === 'active')   { widgetState = 'agent_active';  render(); }
+              if (s === null)       { widgetState = 'idle'; stopPolling(); render(); }
+            });
+          })
+          .catch(function () { startPolling(); });
+      } catch (e) {
+        startPolling();
+      }
+    });
+  }
+
+  // messages array mutation helper used by Ably handler (avoids referencing stale closures).
+  function setMessages(updater) {
+    messages = updater(messages);
+  }
+
+  // Fetches the live agent presence count and calls callback(count).
+  // Used to show "N agents online" in the escalation prompt.
+  function fetchAgentCount(callback) {
+    fetch(API_ABLY_TOKEN + '?productId=' + encodeURIComponent(productId) + '&presenceOnly=true')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { callback(data && typeof data.count === 'number' ? data.count : 0); })
+      .catch(function () { callback(0); });
   }
 
   // ── Escalation trigger ───────────────────────────────────────────────────
@@ -567,7 +666,10 @@
       if (!res.ok) throw new Error('HTTP ' + res.status);
 
       var convId = res.headers.get('x-conversation-id');
-      if (convId) setConvId(convId, customer);
+      if (convId) {
+        setConvId(convId, customer);
+        subscribeToConversation(convId);
+      }
 
       // Check if the server indicated an escalation is already active
       var escStatus = res.headers.get('x-escalation-status');
@@ -658,6 +760,9 @@
           widgetState = 'agent_active';
           startPolling();
         }
+
+        // Subscribe to real-time updates now that we have a confirmed convId.
+        subscribeToConversation(convId);
 
         render();
       })
