@@ -15,8 +15,8 @@
       "when": 1776994701507,
       "tag": "0001_simple_sally_floyd",
       "breakpoints": true
-    }
-    ,{
+    },
+    {
       "idx": 2,
       "version": "7",
       "when": 1745395200000,
@@ -77,6 +77,13 @@
       "version": "7",
       "when": 1777420800000,
       "tag": "0010_security_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777188311500,
+      "tag": "0011_yielding_scorpion",
       "breakpoints": true
     }
   ]
