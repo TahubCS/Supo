@@ -5,6 +5,8 @@ export type ConversationWithDetails = {
   status: string;
   assigneeId: string | null;
   aiHandled: boolean;
+  escalationStatus: string | null;
+  escalatedAt: Date | null;
   subject: string | null;
   lastMessageAt: Date;
   createdAt: Date;
