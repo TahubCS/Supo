@@ -14,8 +14,10 @@
   var scriptEl = document.currentScript;
   var API_ORIGIN = settings.apiUrl
     || (scriptEl ? new URL(scriptEl.src).origin : location.origin);
-  var API_CONFIG = API_ORIGIN + '/api/chat?productId=' + encodeURIComponent(productId);
-  var API_CHAT   = API_ORIGIN + '/api/chat';
+  var API_CONFIG   = API_ORIGIN + '/api/chat?productId=' + encodeURIComponent(productId);
+  var API_CHAT     = API_ORIGIN + '/api/chat';
+  var API_ESCALATE = API_ORIGIN + '/api/chat/escalate';
+  var API_POLL     = API_ORIGIN + '/api/messages/poll';
 
   // ── Persistence ──────────────────────────────────────────────────────────
   var CONV_KEY = 'supo_conv_' + productId;
@@ -51,9 +53,95 @@
     position: 'bottom-right',
     theme: 'dark',
   };
-  var messages    = [];  // { role: 'user'|'ai'|'typing', text: string }
+  var messages = [];
+  // 'idle'          — normal, textarea enabled
+  // 'streaming'     — AI streaming, textarea disabled
+  // 'waiting_agent' — escalation pending, textarea locked, polling active
+  // 'agent_active'  — agent connected, textarea enabled, polling active
+  var widgetState = 'idle';
   var isOpen      = false;
-  var isStreaming  = false;
+
+  // ── Polling ──────────────────────────────────────────────────────────────
+  var pollTimer   = null;
+  var lastSeenAt  = null; // ISO string — timestamp of the last message we've seen
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(doPoll, 4000);
+  }
+
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function doPoll() {
+    var customer = getCustomer();
+    var convId   = getConvId(customer);
+    if (!convId) return;
+
+    var url = API_POLL
+      + '?conversationId=' + encodeURIComponent(convId)
+      + '&productId='      + encodeURIComponent(productId)
+      + '&since='          + encodeURIComponent(lastSeenAt || new Date(0).toISOString());
+
+    fetch(url)
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+
+        // Advance state machine based on escalation status from server
+        if (data.escalationStatus === 'active' && widgetState === 'waiting_agent') {
+          widgetState = 'agent_active';
+          render();
+        } else if (data.escalationStatus === null && widgetState !== 'idle' && widgetState !== 'streaming') {
+          // Conversation was resolved/reset — return to idle
+          widgetState = 'idle';
+          stopPolling();
+          render();
+        }
+
+        // Append any new agent messages
+        if (data.messages && data.messages.length > 0) {
+          var added = false;
+          data.messages.forEach(function (m) {
+            if (m.senderType === 'agent') {
+              messages.push({ role: 'agent', text: m.body });
+              added = true;
+            }
+          });
+          lastSeenAt = data.messages[data.messages.length - 1].createdAt;
+          if (added) render();
+        }
+      })
+      .catch(function () { /* network hiccup — retry next tick */ });
+  }
+
+  // ── Escalation trigger ───────────────────────────────────────────────────
+  function requestEscalation() {
+    var customer = getCustomer();
+    var convId   = getConvId(customer);
+    if (!convId) return;
+
+    fetch(API_ESCALATE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ productId: productId, conversationId: convId, customer: customer }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (data && (data.escalationStatus === 'pending' || data.escalationStatus === 'active')) {
+          widgetState = data.escalationStatus === 'active' ? 'agent_active' : 'waiting_agent';
+          lastSeenAt  = new Date().toISOString();
+          messages.push({ role: 'system', text: 'Connecting you to an agent…' });
+          render();
+          startPolling();
+        }
+      })
+      .catch(function () {
+        messages.push({ role: 'system', text: 'Could not connect to an agent. Please try again.' });
+        render();
+      });
+  }
 
   // ── DOM bootstrap ────────────────────────────────────────────────────────
   var host = document.createElement('div');
@@ -79,17 +167,23 @@
 
   // ── CSS ──────────────────────────────────────────────────────────────────
   function buildCSS() {
-    var a = cfg.accentColor;
+    var a      = cfg.accentColor;
     var isDark = cfg.theme === 'dark';
     var isRight = cfg.position !== 'bottom-left';
 
-    var bg       = isDark ? '#18181b' : '#ffffff';
-    var border   = isDark ? '#27272a' : '#e4e4e7';
-    var msgBg    = isDark ? '#27272a' : '#f4f4f5';
-    var text     = isDark ? '#e4e4e7' : '#18181b';
-    var muted    = isDark ? '#a1a1aa' : '#71717a';
-    var inputBg  = isDark ? '#27272a' : '#f4f4f5';
-    var pos      = isRight ? 'right' : 'left';
+    var bg      = isDark ? '#18181b' : '#ffffff';
+    var border  = isDark ? '#27272a' : '#e4e4e7';
+    var msgBg   = isDark ? '#27272a' : '#f4f4f5';
+    var agentBg = isDark ? '#1e2a1e' : '#f0fdf4';
+    var agentBorder = isDark ? '#2d4a2d' : '#bbf7d0';
+    var agentText   = isDark ? '#86efac' : '#166534';
+    var sysBg   = isDark ? '#1c1c2e' : '#f5f3ff';
+    var sysBorder = isDark ? '#2d2d50' : '#ddd6fe';
+    var sysText = isDark ? '#a78bfa' : '#6d28d9';
+    var text    = isDark ? '#e4e4e7' : '#18181b';
+    var muted   = isDark ? '#a1a1aa' : '#71717a';
+    var inputBg = isDark ? '#27272a' : '#f4f4f5';
+    var pos     = isRight ? 'right' : 'left';
 
     return [
       '* { box-sizing: border-box; margin: 0; padding: 0; }',
@@ -119,9 +213,15 @@
       '#supo-head-icon { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,.2);',
       '  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }',
       '#supo-head-name { font-size: 13px; font-weight: 600; color: #fff; flex: 1; }',
+      '#supo-head-status { font-size: 10px; color: rgba(255,255,255,.7); margin-top: 1px; }',
       '#supo-close { background: none; border: none; cursor: pointer; color: rgba(255,255,255,.8);',
       '  padding: 2px; display: flex; line-height: 1; }',
       '#supo-close:hover { color: #fff; }',
+
+      // Waiting for agent — animated dots under the header name
+      '#supo-connecting { display: flex; align-items: center; gap: 4px; padding: 6px 14px;',
+      '  background: rgba(0,0,0,.15); flex-shrink: 0; }',
+      '#supo-connecting span { font-size: 11px; color: rgba(255,255,255,.8); }',
 
       '#supo-msgs {',
       '  flex: 1; overflow-y: auto; padding: 12px; display: flex;',
@@ -130,19 +230,36 @@
       '#supo-msgs::-webkit-scrollbar-thumb { background: ' + border + '; border-radius: 2px; }',
 
       '.supo-msg { display: flex; flex-direction: column; max-width: 82%; }',
-      '.supo-msg.supo-user { align-self: flex-end; align-items: flex-end; }',
-      '.supo-msg.supo-ai   { align-self: flex-start; align-items: flex-start; }',
+      '.supo-msg.supo-user    { align-self: flex-end; align-items: flex-end; }',
+      '.supo-msg.supo-ai      { align-self: flex-start; align-items: flex-start; }',
+      '.supo-msg.supo-agent   { align-self: flex-start; align-items: flex-start; }',
+      '.supo-msg.supo-system  { align-self: center; align-items: center; width: 100%; max-width: 100%; }',
+
       '.supo-bub {',
       '  padding: 8px 11px; border-radius: 12px; font-size: 13px;',
       '  line-height: 1.5; word-break: break-word; white-space: pre-wrap; }',
-      '.supo-user .supo-bub { background: ' + a + '; color: #fff; border-bottom-right-radius: 4px; }',
-      '.supo-ai   .supo-bub { background: ' + msgBg + '; color: ' + text + '; border-bottom-left-radius: 4px; }',
+      '.supo-user  .supo-bub { background: ' + a + '; color: #fff; border-bottom-right-radius: 4px; }',
+      '.supo-ai    .supo-bub { background: ' + msgBg + '; color: ' + text + '; border-bottom-left-radius: 4px; }',
+      '.supo-agent .supo-bub { background: ' + agentBg + '; color: ' + agentText + ';',
+      '  border: 1px solid ' + agentBorder + '; border-bottom-left-radius: 4px; }',
+      '.supo-system .supo-bub { background: ' + sysBg + '; color: ' + sysText + ';',
+      '  border: 1px solid ' + sysBorder + '; border-radius: 8px; font-size: 11px;',
+      '  text-align: center; width: 100%; }',
+
+      '.supo-sender-label { font-size: 10px; color: ' + muted + '; margin-bottom: 2px; }',
+      '.supo-agent .supo-sender-label { color: ' + agentText + '; opacity: .8; }',
 
       '.supo-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;',
       '  background: ' + muted + '; animation: supo-blink 1.2s infinite; margin: 0 1px; }',
       '.supo-dot:nth-child(2) { animation-delay: .2s; }',
       '.supo-dot:nth-child(3) { animation-delay: .4s; }',
       '@keyframes supo-blink { 0%,80%,100% { opacity:.2; } 40% { opacity:1; } }',
+
+      // Waiting spinner for the connecting banner
+      '.supo-spin { display: inline-block; width: 10px; height: 10px; border-radius: 50%;',
+      '  border: 2px solid rgba(255,255,255,.3); border-top-color: #fff;',
+      '  animation: supo-rotate 0.8s linear infinite; }',
+      '@keyframes supo-rotate { to { transform: rotate(360deg); } }',
 
       '#supo-id-form {',
       '  flex: 1; padding: 22px 16px; display: flex; flex-direction: column; gap: 11px;',
@@ -171,12 +288,21 @@
       '  line-height: 1.45; font-family: inherit; }',
       '#supo-input:focus { border-color: ' + a + '; }',
       '#supo-input::placeholder { color: ' + muted + '; }',
+      '#supo-input:disabled { opacity: .5; cursor: not-allowed; }',
       '#supo-send {',
       '  padding: 7px 12px; background: ' + a + '; color: #fff; border: none;',
       '  border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 500;',
       '  height: 34px; flex-shrink: 0; font-family: inherit; }',
       '#supo-send:hover:not(:disabled) { opacity: .9; }',
       '#supo-send:disabled { opacity: .45; cursor: default; }',
+
+      // "Speak to an agent" quick-reply button — only shown when AI responds with escalation offer
+      '#supo-escalate-btn {',
+      '  margin: 0 12px 8px; padding: 8px 14px; border-radius: 8px; cursor: pointer;',
+      '  font-size: 12px; font-weight: 500; font-family: inherit;',
+      '  background: transparent; border: 1px solid ' + agentBorder + '; color: ' + agentText + ';',
+      '  text-align: center; transition: background .15s; }',
+      '#supo-escalate-btn:hover { background: ' + agentBg + '; }',
 
       '#supo-powered {',
       '  text-align: center; padding: 3px 0 8px;',
@@ -187,10 +313,11 @@
   }
 
   // ── SVG icons ────────────────────────────────────────────────────────────
-  var ICON_CHAT  = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>';
-  var ICON_CLOSE = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-  var ICON_X_SM  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  var ICON_CHAT   = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>';
+  var ICON_CLOSE  = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
+  var ICON_X_SM   = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>';
   var ICON_MSG_SM = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>';
+  var ICON_AGENT  = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>';
 
   // ── Render ───────────────────────────────────────────────────────────────
   function render() {
@@ -222,17 +349,49 @@
   }
 
   function renderHeader() {
+    var subtitle = '';
+    if (widgetState === 'waiting_agent') {
+      subtitle = '<div id="supo-head-status">' +
+        '<span class="supo-spin"></span> Connecting to an agent…' +
+        '</div>';
+    } else if (widgetState === 'agent_active') {
+      subtitle = '<div id="supo-head-status">' + ICON_AGENT + ' Agent connected</div>';
+    }
     return (
       '<div id="supo-head">' +
       '<div id="supo-head-icon">' + ICON_MSG_SM + '</div>' +
-      '<span id="supo-head-name">' + esc(cfg.botName) + '</span>' +
+      '<div style="flex:1;min-width:0">' +
+      '<div id="supo-head-name">' + esc(cfg.botName) + '</div>' +
+      subtitle +
+      '</div>' +
       '<button id="supo-close" aria-label="Close">' + ICON_X_SM + '</button>' +
       '</div>'
     );
   }
 
+  // Whether the last AI message offered escalation — used to show the quick-reply button
+  function lastAiOfferedEscalation() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var m = messages[i];
+      if (m.role === 'ai') {
+        var lower = m.text.toLowerCase();
+        return lower.indexOf('human agent') !== -1 ||
+               lower.indexOf('connect you') !== -1 ||
+               lower.indexOf('live agent') !== -1 ||
+               lower.indexOf('support agent') !== -1 ||
+               lower.indexOf('speak to') !== -1;
+      }
+      // Stop looking back if we hit a user or agent message
+      if (m.role === 'user' || m.role === 'agent') break;
+    }
+    return false;
+  }
+
   function renderChat() {
     var html = '<div id="supo-msgs">';
+    var isWaiting = widgetState === 'waiting_agent';
+    var isAgentActive = widgetState === 'agent_active';
+    var isStreaming = widgetState === 'streaming';
 
     if (messages.length === 0) {
       html += '<div class="supo-msg supo-ai"><div class="supo-bub">' + esc(cfg.greeting) + '</div></div>';
@@ -244,17 +403,39 @@
         html += '<div class="supo-msg supo-user"><div class="supo-bub">' + esc(m.text) + '</div></div>';
       } else if (m.role === 'ai') {
         html += '<div class="supo-msg supo-ai"><div class="supo-bub supo-ai-bub">' + esc(m.text) + '</div></div>';
+      } else if (m.role === 'agent') {
+        html += '<div class="supo-msg supo-agent">' +
+          '<div class="supo-sender-label">Support Agent</div>' +
+          '<div class="supo-bub">' + esc(m.text) + '</div>' +
+          '</div>';
       } else if (m.role === 'typing') {
         html += '<div class="supo-msg supo-ai"><div class="supo-bub"><span class="supo-dot"></span><span class="supo-dot"></span><span class="supo-dot"></span></div></div>';
+      } else if (m.role === 'system') {
+        html += '<div class="supo-msg supo-system"><div class="supo-bub">' + esc(m.text) + '</div></div>';
       }
     }
 
     html += '</div>';
+
+    // Quick-reply "Speak to an Agent" button — shown only when idle and AI offered escalation
+    var showEscBtn = widgetState === 'idle' && lastAiOfferedEscalation();
+    if (showEscBtn) {
+      html += '<button id="supo-escalate-btn">Speak to an Agent</button>';
+    }
+
+    // Composer — disabled while streaming or waiting for an agent
+    var composerDisabled = isStreaming || isWaiting;
+    var placeholder = isWaiting
+      ? 'Waiting for an agent…'
+      : isAgentActive
+        ? 'Reply to agent…'
+        : 'Ask a question…';
+
     html +=
       '<div id="supo-composer">' +
-      '<textarea id="supo-input" placeholder="Ask a question…" rows="1"' +
-      (isStreaming ? ' disabled' : '') + '></textarea>' +
-      '<button id="supo-send"' + (isStreaming ? ' disabled' : '') + '>Send</button>' +
+      '<textarea id="supo-input" placeholder="' + placeholder + '" rows="1"' +
+      (composerDisabled ? ' disabled' : '') + '></textarea>' +
+      '<button id="supo-send"' + (composerDisabled ? ' disabled' : '') + '>Send</button>' +
       '</div>';
 
     return html;
@@ -290,6 +471,9 @@
       });
     }
 
+    var escBtn = $('#supo-escalate-btn');
+    if (escBtn) escBtn.addEventListener('click', requestEscalation);
+
     var sendBtn = $('#supo-send');
     var inputEl = $('#supo-input');
     if (sendBtn && inputEl) {
@@ -308,8 +492,15 @@
     isOpen = !isOpen;
     render();
     if (isOpen) {
+      // Resume polling when widget is re-opened during an escalation
+      if (widgetState === 'waiting_agent' || widgetState === 'agent_active') {
+        startPolling();
+      }
       var inputEl = $('#supo-input');
       if (inputEl) setTimeout(function () { inputEl.focus(); }, 50);
+    } else {
+      // Stop polling while widget is closed to save requests
+      stopPolling();
     }
   }
 
@@ -328,7 +519,7 @@
   }
 
   function send() {
-    if (isStreaming) return;
+    if (widgetState === 'streaming' || widgetState === 'waiting_agent') return;
     var inputEl = $('#supo-input');
     if (!inputEl) return;
     var text = inputEl.value.trim();
@@ -338,11 +529,29 @@
     inputEl.style.height = 'auto';
 
     messages.push({ role: 'user', text: text });
-    messages.push({ role: 'typing' });
-    isStreaming = true;
-    render();
 
     var customer = getCustomer();
+
+    // In agent_active mode the server stores the message and returns a static
+    // acknowledgement — no streaming occurs.
+    if (widgetState === 'agent_active') {
+      render();
+      fetch(API_CHAT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: productId,
+          message: text,
+          conversationId: getConvId(customer) || undefined,
+          customer: customer,
+        }),
+      }).catch(function () {});
+      return;
+    }
+
+    messages.push({ role: 'typing' });
+    widgetState = 'streaming';
+    render();
 
     fetch(API_CHAT, {
       method: 'POST',
@@ -360,6 +569,17 @@
       var convId = res.headers.get('x-conversation-id');
       if (convId) setConvId(convId, customer);
 
+      // Check if the server indicated an escalation is already active
+      var escStatus = res.headers.get('x-escalation-status');
+      if (escStatus === 'pending' || escStatus === 'active') {
+        messages[messages.length - 1] = { role: 'system', text: 'An agent will be with you shortly.' };
+        widgetState = escStatus === 'active' ? 'agent_active' : 'waiting_agent';
+        if (!lastSeenAt) lastSeenAt = new Date().toISOString();
+        startPolling();
+        render();
+        return;
+      }
+
       // Replace typing indicator with an empty AI bubble
       messages[messages.length - 1] = { role: 'ai', text: '' };
       render();
@@ -371,7 +591,7 @@
       function pump() {
         return reader.read().then(function (result) {
           if (result.done) {
-            isStreaming = false;
+            widgetState = 'idle';
             var sendBtn = $('#supo-send');
             var inp = $('#supo-input');
             if (sendBtn) sendBtn.disabled = false;
@@ -394,15 +614,13 @@
     })
     .catch(function () {
       messages[messages.length - 1] = { role: 'ai', text: 'Something went wrong. Please try again.' };
-      isStreaming = false;
+      widgetState = 'idle';
       render();
     });
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────
   function init() {
-    // Fetch widget config (bot name, theme, accent color, etc.) then render.
-    // Falls back to defaults if the request fails so the widget always loads.
     fetch(API_CONFIG)
       .then(function (res) { return res.ok ? res.json() : {}; })
       .then(function (data) {
@@ -410,7 +628,7 @@
         render();
       })
       .catch(function () {
-        render(); // render with defaults
+        render();
       });
   }
 
