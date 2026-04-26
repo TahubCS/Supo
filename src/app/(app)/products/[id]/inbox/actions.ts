@@ -67,7 +67,7 @@ export async function resolveConversation(conversationId: string): Promise<void>
   const now = new Date();
   await db
     .update(conversation)
-    .set({ status: "resolved", updatedAt: now })
+    .set({ status: "resolved", escalationStatus: null, updatedAt: now })
     .where(eq(conversation.id, conversationId));
 
   try {
@@ -122,7 +122,14 @@ export async function sendMessage(
 
   await db
     .update(conversation)
-    .set({ lastMessageAt: now, updatedAt: now, aiHandled: false })
+    .set({
+      lastMessageAt: now,
+      updatedAt: now,
+      aiHandled: false,
+      // Upgrade pending → active on first agent reply; auto-assign to responder.
+      escalationStatus: "active",
+      assigneeId: session.user.id,
+    })
     .where(eq(conversation.id, conversationId));
 }
 

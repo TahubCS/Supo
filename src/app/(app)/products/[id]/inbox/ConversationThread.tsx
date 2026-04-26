@@ -228,7 +228,17 @@ export function ConversationThread({
                   Snoozed
                 </Badge>
               )}
-              {conversation.aiHandled && (
+              {conversation.escalationStatus === "pending" && (
+                <span className="shrink-0 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] text-amber-500">
+                  Needs Agent
+                </span>
+              )}
+              {conversation.escalationStatus === "active" && (
+                <span className="shrink-0 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-px text-[10px] text-emerald-500">
+                  Agent Active
+                </span>
+              )}
+              {!conversation.escalationStatus && conversation.aiHandled && (
                 <span className="shrink-0 rounded-full border border-border px-1.5 py-px text-[10px] text-[color:var(--text-tertiary)]">
                   AI
                 </span>

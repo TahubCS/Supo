@@ -87,7 +87,17 @@ function ConversationItem({
                 Snoozed
               </Badge>
             )}
-            {conv.aiHandled && (
+            {conv.escalationStatus === "pending" && (
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] text-amber-500">
+                Needs Agent
+              </span>
+            )}
+            {conv.escalationStatus === "active" && (
+              <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-px text-[10px] text-emerald-500">
+                Agent Active
+              </span>
+            )}
+            {!conv.escalationStatus && conv.aiHandled && (
               <span className="rounded-full border border-border px-1.5 py-px text-[10px] text-[color:var(--text-tertiary)]">
                 AI
               </span>
@@ -116,6 +126,11 @@ export function ConversationList({
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<FilterTab>("all");
 
+  const needsAgentCount = useMemo(
+    () => conversations.filter((c) => c.escalationStatus === "pending").length,
+    [conversations],
+  );
+
   const filtered = useMemo(() => {
     let list = conversations;
     if (tab !== "all") list = list.filter((c) => c.status === tab);
@@ -136,9 +151,16 @@ export function ConversationList({
       <div className="space-y-2 border-b border-border px-4 py-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-semibold text-foreground">Inbox</span>
-          <span className="rounded-full bg-[color:var(--card-elevated)] px-2 py-0.5 text-xs text-[color:var(--text-secondary)]">
-            {conversations.length}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {needsAgentCount > 0 && (
+              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-500">
+                {needsAgentCount} waiting
+              </span>
+            )}
+            <span className="rounded-full bg-[color:var(--card-elevated)] px-2 py-0.5 text-xs text-[color:var(--text-secondary)]">
+              {conversations.length}
+            </span>
+          </div>
         </div>
 
         <div className="relative">
