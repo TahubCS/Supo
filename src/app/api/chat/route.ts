@@ -254,6 +254,8 @@ export async function POST(req: NextRequest) {
       status: "open",
       assigneeId: null,
       aiHandled: true,
+      escalationStatus: null,
+      escalatedAt: null,
       subject: trimmedMessage.slice(0, 80),
       lastMessageAt: now,
       createdAt: now,
@@ -265,6 +267,36 @@ export async function POST(req: NextRequest) {
       .update(conversation)
       .set({ status: "open", updatedAt: now })
       .where(eq(conversation.id, conv.id));
+  }
+
+  // Narrow type — conv is always defined after get-or-create above.
+  if (!conv) {
+    return NextResponse.json({ error: "Internal error" }, { status: 500, headers: CORS });
+  }
+
+  // ── Escalation gate — human agent has taken over, skip AI entirely ───────
+  if (conv.escalationStatus === "pending" || conv.escalationStatus === "active") {
+    await db.insert(message).values({
+      id: crypto.randomUUID(),
+      conversationId: conv.id,
+      body: trimmedMessage,
+      senderType: "customer",
+      senderId: null,
+      createdAt: now,
+    });
+    await db
+      .update(conversation)
+      .set({ lastMessageAt: now, updatedAt: now })
+      .where(eq(conversation.id, conv.id));
+
+    const escHeaders = new Headers(CORS);
+    escHeaders.set("x-conversation-id", conv.id);
+    escHeaders.set("x-escalation-status", conv.escalationStatus);
+    const waitMsg =
+      conv.escalationStatus === "pending"
+        ? "Our team has been notified. An agent will be with you shortly."
+        : "You're connected with an agent.";
+    return new Response(waitMsg, { status: 200, headers: escHeaders });
   }
 
   // ── Save customer message ────────────────────────────────────────────────
