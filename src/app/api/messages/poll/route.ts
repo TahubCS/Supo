@@ -3,6 +3,12 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { message, product } from "@/db/schema";
+import {
+  getSecurityIp,
+  isSecurityQuotaError,
+  requireSecurityQuota,
+  safeQuotaKey,
+} from "@/lib/security";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
 
 // Same CORS policy as /api/chat — widget runs on any customer domain.
@@ -14,6 +20,31 @@ const CORS: HeadersInit = {
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS });
+}
+
+function quotaErrorResponse(error: unknown) {
+  if (!isSecurityQuotaError(error)) return null;
+  const headers = new Headers(CORS);
+  headers.set("Content-Type", "application/json");
+  if (error.retryAfter) {
+    headers.set("Retry-After", String(error.retryAfter));
+  }
+
+  return NextResponse.json({ error: error.message }, { status: error.status, headers });
+}
+
+function parseSinceDate(value: string | null): Date | null {
+  if (!value) return new Date(0);
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+    return null;
+  }
+
+  return parsed;
 }
 
 export async function GET(req: NextRequest) {
@@ -30,8 +61,6 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Verify the conversation belongs to this product (implicit auth — same
-  // trust model as /api/chat where productId is the only identifier).
   const foundProduct = await db.query.product.findFirst({
     where: eq(product.id, productId),
   });
@@ -48,7 +77,42 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
 
-  const sinceDate = since ? new Date(since) : new Date(0);
+  const sinceDate = parseSinceDate(since);
+  if (!sinceDate) {
+    return NextResponse.json({ error: "Invalid since timestamp" }, { status: 400, headers: CORS });
+  }
+
+  try {
+    const ip = getSecurityIp(req.headers);
+    const event = {
+      organizationId: foundProduct.organizationId,
+      productId,
+      headerList: req.headers,
+      path: "/api/messages/poll",
+      method: "GET",
+      metadata: { conversationId },
+    };
+    await requireSecurityQuota(
+      "messages.poll.conversation.minute",
+      conversationToken,
+      event,
+    );
+    await requireSecurityQuota(
+      "messages.poll.ip.minute",
+      `${productId}:${ip}`,
+      {
+        ...event,
+        metadata: {
+          ...event.metadata,
+          ip: safeQuotaKey(ip),
+        },
+      },
+    );
+  } catch (error) {
+    const response = quotaErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
 
   const messages = await db.query.message.findMany({
     where: and(
