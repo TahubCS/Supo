@@ -1,9 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { conversation, member, product } from "@/db/schema";
+import { member, product } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import {
   conversationChannelName,
@@ -12,6 +12,7 @@ import {
   inboxChannelName,
   presenceChannelName,
 } from "@/lib/ably";
+import { findWidgetConversation } from "@/lib/widget-conversation-access";
 
 // CORS — widget token requests are cross-origin (widget.js from any domain).
 const CORS: HeadersInit = {
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const productId = searchParams.get("productId");
   const conversationId = searchParams.get("conversationId");
+  const conversationToken = searchParams.get("conversationToken");
   const presenceOnly = searchParams.get("presenceOnly") === "true";
 
   if (!productId) {
@@ -53,11 +55,14 @@ export async function GET(req: NextRequest) {
   // ── Widget conversation token ─────────────────────────────────────────────
   // No session required. Validates conversationId belongs to productId.
   if (conversationId) {
-    const conv = await db.query.conversation.findFirst({
-      where: and(
-        eq(conversation.id, conversationId),
-        eq(conversation.productId, productId),
-      ),
+    if (!conversationToken) {
+      return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
+    }
+
+    const conv = await findWidgetConversation({
+      conversationId,
+      productId,
+      conversationToken,
     });
     if (!conv) {
       return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });

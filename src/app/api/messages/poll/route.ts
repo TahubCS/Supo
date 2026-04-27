@@ -2,7 +2,8 @@ import { and, eq, gt } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { conversation, message, product } from "@/db/schema";
+import { message, product } from "@/db/schema";
+import { findWidgetConversation } from "@/lib/widget-conversation-access";
 
 // Same CORS policy as /api/chat — widget runs on any customer domain.
 const CORS: HeadersInit = {
@@ -18,12 +19,13 @@ export function OPTIONS() {
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
   const conversationId = searchParams.get("conversationId");
+  const conversationToken = searchParams.get("conversationToken");
   const productId = searchParams.get("productId");
   const since = searchParams.get("since");
 
-  if (!conversationId || !productId) {
+  if (!conversationId || !conversationToken || !productId) {
     return NextResponse.json(
-      { error: "conversationId and productId are required" },
+      { error: "conversationId, conversationToken, and productId are required" },
       { status: 400, headers: CORS },
     );
   }
@@ -37,11 +39,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
 
-  const conv = await db.query.conversation.findFirst({
-    where: and(
-      eq(conversation.id, conversationId),
-      eq(conversation.productId, productId),
-    ),
+  const conv = await findWidgetConversation({
+    conversationId,
+    productId,
+    conversationToken,
   });
   if (!conv) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });

@@ -9,6 +9,7 @@ import {
   requireSecurityQuota,
   safeQuotaKey,
 } from "@/lib/security";
+import { findWidgetConversation } from "@/lib/widget-conversation-access";
 
 // Same CORS policy as /api/chat — widget runs on any customer domain.
 const CORS: HeadersInit = {
@@ -24,6 +25,7 @@ export function OPTIONS() {
 type EscalateRequest = {
   productId: string;
   conversationId: string;
+  conversationToken?: string;
   customer: { name: string; email: string };
 };
 
@@ -35,12 +37,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400, headers: CORS });
   }
 
-  const { productId, conversationId, customer: customerInfo } = body;
+  const { productId, conversationId, conversationToken, customer: customerInfo } = body;
   const customerEmail = customerInfo?.email?.trim().toLowerCase() ?? "";
 
-  if (!productId || !conversationId || !customerEmail) {
+  if (!productId || !conversationId || !conversationToken || !customerEmail) {
     return NextResponse.json(
-      { error: "productId, conversationId, and customer.email are required" },
+      { error: "productId, conversationId, conversationToken, and customer.email are required" },
       { status: 400, headers: CORS },
     );
   }
@@ -82,12 +84,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
 
-  const conv = await db.query.conversation.findFirst({
-    where: and(
-      eq(conversation.id, conversationId),
-      eq(conversation.productId, productId),
-      eq(conversation.customerId, cust.id),
-    ),
+  const conv = await findWidgetConversation({
+    conversationId,
+    productId,
+    conversationToken,
+    customerId: cust.id,
   });
   if (!conv) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });

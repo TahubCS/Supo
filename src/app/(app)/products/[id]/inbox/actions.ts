@@ -18,6 +18,22 @@ type ExtractedSuggestion = {
   reason?: string;
   confidence?: number;
 };
+type LifecycleUpdate = {
+  organizationId: string;
+  productId: string;
+  conversationId: string;
+  status: string;
+  escalationStatus: string | null;
+  aiHandled?: boolean;
+  lastMessageAt?: Date;
+  latestMessage?: {
+    id: string;
+    body: string;
+    senderType: string;
+    createdAt: Date;
+  };
+  notifyWidget?: boolean;
+};
 
 async function verifyConversationAccess(conversationId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -38,6 +54,51 @@ async function verifyConversationAccess(conversationId: string) {
   }
 
   return { session, conv, membership };
+}
+
+function publishConversationLifecycleUpdate({
+  organizationId,
+  productId,
+  conversationId,
+  status,
+  escalationStatus,
+  aiHandled,
+  lastMessageAt,
+  latestMessage,
+  notifyWidget = false,
+}: LifecycleUpdate): Promise<void> {
+  const inboxPayload = {
+    conversationId,
+    status,
+    escalationStatus,
+    aiHandled,
+    lastMessageAt: lastMessageAt?.toISOString(),
+    latestMessage: latestMessage
+      ? {
+          ...latestMessage,
+          createdAt: latestMessage.createdAt.toISOString(),
+        }
+      : undefined,
+  };
+
+  const publishes: Promise<void>[] = [
+    publishToProductInbox(
+      organizationId,
+      productId,
+      "conversation_updated",
+      inboxPayload,
+    ),
+  ];
+
+  if (notifyWidget) {
+    publishes.push(
+      publishToConversation(organizationId, conversationId, "escalation_update", {
+        status: escalationStatus,
+      }),
+    );
+  }
+
+  return Promise.allSettled(publishes).then(() => undefined);
 }
 
 export async function getMessages(conversationId: string): Promise<MessageRow[]> {
@@ -71,11 +132,13 @@ export async function resolveConversation(conversationId: string): Promise<void>
     .set({ status: "resolved", escalationStatus: null, updatedAt: now })
     .where(eq(conversation.id, conversationId));
 
-  // Push real-time update to agent inbox — fire-and-forget.
-  publishToProductInbox(membership.organizationId, conv.productId, "conversation_updated", {
+  publishConversationLifecycleUpdate({
+    organizationId: membership.organizationId,
+    productId: conv.productId,
     conversationId,
     status: "resolved",
     escalationStatus: null,
+    notifyWidget: true,
   }).catch(() => {});
 
   try {
@@ -86,21 +149,39 @@ export async function resolveConversation(conversationId: string): Promise<void>
 }
 
 export async function snoozeConversation(conversationId: string): Promise<void> {
-  await verifyConversationAccess(conversationId);
+  const { conv, membership } = await verifyConversationAccess(conversationId);
   const now = new Date();
   await db
     .update(conversation)
-    .set({ status: "snoozed", updatedAt: now })
+    .set({ status: "snoozed", escalationStatus: null, updatedAt: now })
     .where(eq(conversation.id, conversationId));
+
+  publishConversationLifecycleUpdate({
+    organizationId: membership.organizationId,
+    productId: conv.productId,
+    conversationId,
+    status: "snoozed",
+    escalationStatus: null,
+    notifyWidget: true,
+  }).catch(() => {});
 }
 
 export async function reopenConversation(conversationId: string): Promise<void> {
-  await verifyConversationAccess(conversationId);
+  const { conv, membership } = await verifyConversationAccess(conversationId);
   const now = new Date();
   await db
     .update(conversation)
-    .set({ status: "open", updatedAt: now })
+    .set({ status: "open", escalationStatus: null, updatedAt: now })
     .where(eq(conversation.id, conversationId));
+
+  publishConversationLifecycleUpdate({
+    organizationId: membership.organizationId,
+    productId: conv.productId,
+    conversationId,
+    status: "open",
+    escalationStatus: null,
+    notifyWidget: true,
+  }).catch(() => {});
 }
 
 export async function sendMessage(
@@ -153,10 +234,20 @@ export async function sendMessage(
     publishToConversation(membership.organizationId, conversationId, "escalation_update", {
       status: "active",
     }),
-    publishToProductInbox(membership.organizationId, conv.productId, "conversation_updated", {
+    publishConversationLifecycleUpdate({
+      organizationId: membership.organizationId,
+      productId: conv.productId,
       conversationId,
-      escalationStatus: "active",
       status: "open",
+      escalationStatus: "active",
+      aiHandled: false,
+      lastMessageAt: now,
+      latestMessage: {
+        id: newMsgId,
+        body,
+        senderType: "agent",
+        createdAt: now,
+      },
     }),
   ]).catch(() => {});
 }

@@ -19,6 +19,10 @@ import {
   requireSecurityQuota,
   safeQuotaKey,
 } from "@/lib/security";
+import {
+  createConversationPublicAccessToken,
+  findWidgetConversation,
+} from "@/lib/widget-conversation-access";
 
 export const maxDuration = 60;
 
@@ -27,7 +31,7 @@ const CORS: HeadersInit = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Expose-Headers": "x-conversation-id, x-sources, x-escalation-status",
+  "Access-Control-Expose-Headers": "x-conversation-id, x-conversation-token, x-sources, x-escalation-status",
 };
 // Cap widget messages to limit abuse and keep prompt size bounded.
 const MAX_WIDGET_MESSAGE_LENGTH = 2000;
@@ -72,6 +76,7 @@ type ChatRequest = {
   productId: string;
   message: string;
   conversationId?: string;
+  conversationToken?: string;
   customer: { name: string; email: string };
 };
 
@@ -125,7 +130,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400, headers: CORS });
   }
 
-  const { productId, message: userMessage, conversationId, customer: customerInfo } = body;
+  const {
+    productId,
+    message: userMessage,
+    conversationId,
+    conversationToken,
+    customer: customerInfo,
+  } = body;
   const trimmedMessage = userMessage?.trim() ?? "";
   const customerName = customerInfo?.name?.trim() ?? "";
   const customerEmail = customerInfo?.email?.trim().toLowerCase() ?? "";
@@ -216,14 +227,17 @@ export async function POST(req: NextRequest) {
 
   // ── Conversation get-or-create ───────────────────────────────────────────
   let conv = conversationId
-    ? await db.query.conversation.findFirst({
-        where: and(
-          eq(conversation.id, conversationId),
-          eq(conversation.productId, productId),
-          eq(conversation.customerId, cust.id),
-        ),
+    ? await findWidgetConversation({
+        conversationId,
+        productId,
+        conversationToken,
+        customerId: cust.id,
       })
     : null;
+
+  if (conversationId && conversationToken && !conv) {
+    return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
+  }
 
   if (!conv) {
     conv = await db.query.conversation.findFirst({
@@ -239,12 +253,14 @@ export async function POST(req: NextRequest) {
   if (!conv) {
     const convId = crypto.randomUUID();
     createdConversation = true;
+    const publicAccessToken = createConversationPublicAccessToken();
     await db.insert(conversation).values({
       id: convId,
       productId,
       customerId: cust.id,
       status: "open",
       aiHandled: true,
+      publicAccessToken,
       subject: trimmedMessage.slice(0, 80),
       lastMessageAt: now,
       createdAt: now,
@@ -259,6 +275,7 @@ export async function POST(req: NextRequest) {
       aiHandled: true,
       escalationStatus: null,
       escalatedAt: null,
+      publicAccessToken,
       subject: trimmedMessage.slice(0, 80),
       lastMessageAt: now,
       createdAt: now,
@@ -317,6 +334,7 @@ export async function POST(req: NextRequest) {
 
     const escHeaders = new Headers(CORS);
     escHeaders.set("x-conversation-id", conv.id);
+    escHeaders.set("x-conversation-token", conv.publicAccessToken);
     escHeaders.set("x-escalation-status", conv.escalationStatus);
     const waitMsg =
       conv.escalationStatus === "pending"
@@ -509,6 +527,7 @@ export async function POST(req: NextRequest) {
   Object.entries(CORS).forEach(([k, v]) => headers.set(k, v));
   // Widget reads x-conversation-id on the first response and stores it for subsequent turns.
   headers.set("x-conversation-id", convId);
+  headers.set("x-conversation-token", conv.publicAccessToken);
   // Optional: widget can display source attributions after the stream ends.
   if (sources.length > 0) {
     headers.set("x-sources", JSON.stringify(sources));
