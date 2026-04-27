@@ -3,7 +3,7 @@
 import * as Ably from "ably";
 import { format, isSameDay } from "date-fns";
 import { BookOpen, MessageSquare } from "lucide-react";
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -12,6 +12,11 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 
+import {
+  closeAblyClient,
+  createAgentAuthCallback,
+  ignoreExpectedAblyTeardown,
+} from "./ably-client";
 import {
   getMessages,
   learnFromConversation,
@@ -85,11 +90,11 @@ function MessageBubble({ msg }: { msg: MessageRow }) {
 
 export function ConversationThread({
   conversation,
-  ablyClient,
+  productId,
   orgId,
 }: {
   conversation: ConversationWithDetails | null;
-  ablyClient: Ably.Realtime | null;
+  productId: string;
   orgId: string;
 }) {
   const router = useRouter();
@@ -99,6 +104,17 @@ export function ConversationThread({
   const [isPending, startTransition] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
   const conversationId = conversation?.id ?? null;
+  const ablyClient = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return new Ably.Realtime({
+      authCallback: createAgentAuthCallback(productId),
+    });
+  }, [productId]);
+
+  useEffect(() => {
+    if (!ablyClient) return;
+    return () => closeAblyClient(ablyClient);
+  }, [ablyClient]);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,7 +173,7 @@ export function ConversationThread({
       });
     }
 
-    void Promise.resolve(ch.subscribe("message", onMessage)).catch(() => {});
+    void Promise.resolve(ch.subscribe("message", onMessage)).catch(ignoreExpectedAblyTeardown);
     return () => {
       try {
         ch.unsubscribe("message", onMessage);
