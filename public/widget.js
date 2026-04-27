@@ -28,14 +28,41 @@
     var email = customer && customer.email ? String(customer.email).trim().toLowerCase() : 'anonymous';
     return CONV_KEY + '_' + email;
   }
-  function getConvId(customer) {
-    return localStorage.getItem(customerConvKey(customer))
-      || sessionStorage.getItem(CONV_KEY)
-      || null;
+  function getConversationRef(customer) {
+    var raw = localStorage.getItem(customerConvKey(customer));
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.id) {
+          return { id: parsed.id, token: parsed.token || null };
+        }
+      } catch {
+        return { id: raw, token: null };
+      }
+    }
+
+    var sessionRaw = sessionStorage.getItem(CONV_KEY);
+    if (!sessionRaw) return { id: null, token: null };
+    try {
+      var sessionParsed = JSON.parse(sessionRaw);
+      if (sessionParsed && sessionParsed.id) {
+        return { id: sessionParsed.id, token: sessionParsed.token || null };
+      }
+    } catch {
+      return { id: sessionRaw, token: null };
+    }
+    return { id: null, token: null };
   }
-  function setConvId(id, customer) {
-    localStorage.setItem(customerConvKey(customer), id);
-    sessionStorage.setItem(CONV_KEY, id);
+  function getConvId(customer) {
+    return getConversationRef(customer).id;
+  }
+  function getConvToken(customer) {
+    return getConversationRef(customer).token;
+  }
+  function setConvId(id, token, customer) {
+    var ref = JSON.stringify({ id: id, token: token || null });
+    localStorage.setItem(customerConvKey(customer), ref);
+    sessionStorage.setItem(CONV_KEY, ref);
   }
   function getCustomer() {
     try { return JSON.parse(localStorage.getItem(CUST_KEY) || 'null'); }
@@ -77,11 +104,13 @@
 
   function doPoll() {
     var customer = getCustomer();
-    var convId   = getConvId(customer);
-    if (!convId) return;
+    var convId = getConvId(customer);
+    var convToken = getConvToken(customer);
+    if (!convId || !convToken) return;
 
     var url = API_POLL
       + '?conversationId=' + encodeURIComponent(convId)
+      + '&conversationToken=' + encodeURIComponent(convToken)
       + '&productId='      + encodeURIComponent(productId)
       + '&since='          + encodeURIComponent(lastSeenAt || new Date(0).toISOString());
 
@@ -147,13 +176,15 @@
   // Subscribes the widget to its conversation channel via Ably WebSocket.
   // Called once we have a convId (from x-conversation-id header or restoreConversation).
   // Polling remains active as the fallback until Ably connects.
-  function subscribeToConversation(convId) {
+  function subscribeToConversation(convId, conversationToken) {
+    var token = conversationToken || getConvToken(getCustomer());
+    if (!token) return;
     if (ablyConvId === convId) return; // already subscribed
-    ablyConvId = convId;
 
     loadAblySDK(function () {
       var tokenUrl = API_ABLY_TOKEN
         + '?conversationId=' + encodeURIComponent(convId)
+        + '&conversationToken=' + encodeURIComponent(token)
         + '&productId='      + encodeURIComponent(productId);
 
       try {
@@ -181,6 +212,7 @@
           .then(function (r) { return r.ok ? r.json() : null; })
           .then(function (data) {
             if (!data || !data.channelName) { startPolling(); return; }
+            ablyConvId = convId;
             var ch = ablyClient.channels.get(data.channelName);
 
             var messageSub = ch.subscribe('message', function (msg) {
@@ -224,12 +256,18 @@
   function requestEscalation() {
     var customer = getCustomer();
     var convId   = getConvId(customer);
-    if (!convId) return;
+    var convToken = getConvToken(customer);
+    if (!convId || !convToken) return;
 
     fetch(API_ESCALATE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productId: productId, conversationId: convId, customer: customer }),
+      body: JSON.stringify({
+        productId: productId,
+        conversationId: convId,
+        conversationToken: convToken,
+        customer: customer,
+      }),
     })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
@@ -646,10 +684,20 @@
         body: JSON.stringify({
           productId: productId,
           message: text,
-          conversationId: getConvId(customer) || undefined,
+          conversationId: convId || undefined,
+          conversationToken: convToken || undefined,
           customer: customer,
         }),
-      }).catch(function () {});
+      })
+      .then(function (res) {
+        if (!res || !res.ok) return;
+        var nextConvId = res.headers.get('x-conversation-id');
+        var nextConvToken = res.headers.get('x-conversation-token');
+        if (nextConvId && nextConvToken) {
+          setConvId(nextConvId, nextConvToken, customer);
+        }
+      })
+      .catch(function () {});
       return;
     }
 
@@ -663,17 +711,19 @@
       body: JSON.stringify({
         productId: productId,
         message: text,
-        conversationId: getConvId(customer) || undefined,
+        conversationId: convId || undefined,
+        conversationToken: convToken || undefined,
         customer: customer,
       }),
     })
     .then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
 
-      var convId = res.headers.get('x-conversation-id');
-      if (convId) {
-        setConvId(convId, customer);
-        subscribeToConversation(convId);
+      var nextConvId = res.headers.get('x-conversation-id');
+      var nextConvToken = res.headers.get('x-conversation-token');
+      if (nextConvId && nextConvToken) {
+        setConvId(nextConvId, nextConvToken, customer);
+        subscribeToConversation(nextConvId, nextConvToken);
       }
 
       // Check if the server indicated an escalation is already active
@@ -732,10 +782,12 @@
   function restoreConversation() {
     var customer = getCustomer();
     var convId   = getConvId(customer);
-    if (!customer || !convId) return;
+    var convToken = getConvToken(customer);
+    if (!customer || !convId || !convToken) return;
 
     var url = API_POLL
       + '?conversationId=' + encodeURIComponent(convId)
+      + '&conversationToken=' + encodeURIComponent(convToken)
       + '&productId='      + encodeURIComponent(productId)
       + '&since='          + encodeURIComponent(new Date(0).toISOString());
 
@@ -767,7 +819,7 @@
         }
 
         // Subscribe to real-time updates now that we have a confirmed convId.
-        subscribeToConversation(convId);
+        subscribeToConversation(convId, convToken);
 
         render();
       })
