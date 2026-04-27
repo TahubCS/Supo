@@ -11,7 +11,7 @@ import {
   product,
 } from "@/db/schema";
 import { env } from "@/lib/env";
-import { publishToConversation } from "@/lib/ably";
+import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import { geminiEmbed, resolveGenerationModel } from "@/lib/knowledge/ai";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
 import {
@@ -194,6 +194,7 @@ export async function POST(req: NextRequest) {
   });
 
   const now = new Date();
+  let createdConversation = false;
 
   if (!cust) {
     const custId = crypto.randomUUID();
@@ -237,6 +238,7 @@ export async function POST(req: NextRequest) {
 
   if (!conv) {
     const convId = crypto.randomUUID();
+    createdConversation = true;
     await db.insert(conversation).values({
       id: convId,
       productId,
@@ -268,6 +270,7 @@ export async function POST(req: NextRequest) {
       .update(conversation)
       .set({ status: "open", updatedAt: now })
       .where(eq(conversation.id, conv.id));
+    conv = { ...conv, status: "open", updatedAt: now };
   }
 
   // Narrow type — conv is always defined after get-or-create above.
@@ -275,10 +278,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal error" }, { status: 500, headers: CORS });
   }
 
+  const orgId = foundProduct.organizationId;
+
   // ── Escalation gate — human agent has taken over, skip AI entirely ───────
   if (conv.escalationStatus === "pending" || conv.escalationStatus === "active") {
+    const customerMessageId = crypto.randomUUID();
     await db.insert(message).values({
-      id: crypto.randomUUID(),
+      id: customerMessageId,
       conversationId: conv.id,
       body: trimmedMessage,
       senderType: "customer",
@@ -289,6 +295,25 @@ export async function POST(req: NextRequest) {
       .update(conversation)
       .set({ lastMessageAt: now, updatedAt: now })
       .where(eq(conversation.id, conv.id));
+    publishToConversation(orgId, conv.id, "message", {
+      id: customerMessageId,
+      body: trimmedMessage,
+      senderType: "customer",
+      createdAt: now.toISOString(),
+    }).catch(() => {});
+    publishToProductInbox(orgId, productId, "conversation_updated", {
+      conversationId: conv.id,
+      status: conv.status,
+      escalationStatus: conv.escalationStatus,
+      aiHandled: conv.aiHandled,
+      lastMessageAt: now.toISOString(),
+      latestMessage: {
+        id: customerMessageId,
+        body: trimmedMessage,
+        senderType: "customer",
+        createdAt: now.toISOString(),
+      },
+    }).catch(() => {});
 
     const escHeaders = new Headers(CORS);
     escHeaders.set("x-conversation-id", conv.id);
@@ -316,14 +341,43 @@ export async function POST(req: NextRequest) {
     throw error;
   }
 
+  const customerMessageId = crypto.randomUUID();
   await db.insert(message).values({
-    id: crypto.randomUUID(),
+    id: customerMessageId,
     conversationId: conv.id,
     body: trimmedMessage,
     senderType: "customer",
     senderId: null,
     createdAt: now,
   });
+  await db
+    .update(conversation)
+    .set({ lastMessageAt: now, updatedAt: now })
+    .where(eq(conversation.id, conv.id));
+  publishToConversation(orgId, conv.id, "message", {
+    id: customerMessageId,
+    body: trimmedMessage,
+    senderType: "customer",
+    createdAt: now.toISOString(),
+  }).catch(() => {});
+  if (createdConversation) {
+    publishToProductInbox(orgId, productId, "new_conversation", {
+      conversationId: conv.id,
+    }).catch(() => {});
+  }
+  publishToProductInbox(orgId, productId, "conversation_updated", {
+    conversationId: conv.id,
+    status: conv.status,
+    escalationStatus: conv.escalationStatus,
+    aiHandled: conv.aiHandled,
+    lastMessageAt: now.toISOString(),
+    latestMessage: {
+      id: customerMessageId,
+      body: trimmedMessage,
+      senderType: "customer",
+      createdAt: now.toISOString(),
+    },
+  }).catch(() => {});
 
   // ── Conversation history (last 20 turns for multi-turn context) ──────────
   const history = await db.query.message.findMany({
@@ -404,7 +458,6 @@ export async function POST(req: NextRequest) {
   const modelId = await resolveGenerationModel();
 
   const convId = conv.id;
-  const orgId = foundProduct.organizationId;
   const result = streamText({
     model: google(modelId),
     system: systemLines,
@@ -430,6 +483,19 @@ export async function POST(req: NextRequest) {
         body: text,
         senderType: "ai",
         createdAt: finishAt.toISOString(),
+      }).catch(() => {});
+      publishToProductInbox(orgId, productId, "conversation_updated", {
+        conversationId: convId,
+        status: "open",
+        escalationStatus: null,
+        aiHandled: true,
+        lastMessageAt: finishAt.toISOString(),
+        latestMessage: {
+          id: newMsgId,
+          body: text,
+          senderType: "ai",
+          createdAt: finishAt.toISOString(),
+        },
       }).catch(() => {});
     },
   });

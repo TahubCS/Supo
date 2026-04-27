@@ -47,7 +47,9 @@ export function InboxView({
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [conversations, setConversations] = useState(initialConversations);
+  const [conversationUpdates, setConversationUpdates] = useState<
+    Record<string, Partial<ConversationWithDetails>>
+  >({});
   const ablyClient = useMemo(
     () =>
       new Ably.Realtime({
@@ -55,6 +57,22 @@ export function InboxView({
         authMethod: "GET",
       }),
     [productId],
+  );
+  const conversations = useMemo(
+    () =>
+      initialConversations
+        .map((conversation) => {
+          const update = conversationUpdates[conversation.id];
+          if (!update) return conversation;
+          return {
+            ...conversation,
+            ...update,
+            customer: update.customer ?? conversation.customer,
+            latestMessage: update.latestMessage ?? conversation.latestMessage,
+          };
+        })
+        .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()),
+    [initialConversations, conversationUpdates],
   );
 
   useEffect(() => {
@@ -73,11 +91,13 @@ export function InboxView({
 
     void Promise.resolve(inboxCh.subscribe("needs_agent", (msg) => {
       const { conversationId } = msg.data as { conversationId: string; subject?: string; customerName: string };
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === conversationId ? { ...c, escalationStatus: "pending" } : c,
-        ),
-      );
+      setConversationUpdates((prev) => ({
+        ...prev,
+        [conversationId]: {
+          ...prev[conversationId],
+          escalationStatus: "pending",
+        },
+      }));
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
         new Notification("Customer needs help", {
           body: (msg.data as { subject?: string; customerName: string }).subject
@@ -88,14 +108,35 @@ export function InboxView({
     })).catch(() => {});
 
     void Promise.resolve(inboxCh.subscribe("conversation_updated", (msg) => {
-      const d = msg.data as { conversationId: string; status: string; escalationStatus: string | null };
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === d.conversationId
-            ? { ...c, status: d.status, escalationStatus: d.escalationStatus }
-            : c,
-        ),
-      );
+      const d = msg.data as {
+        conversationId: string;
+        status: string;
+        escalationStatus: string | null;
+        aiHandled?: boolean;
+        lastMessageAt?: string;
+        latestMessage?: {
+          id: string;
+          body: string;
+          senderType: string;
+          createdAt: string;
+        };
+      };
+      setConversationUpdates((prev) => {
+        const next: Partial<ConversationWithDetails> = {
+          ...prev[d.conversationId],
+          status: d.status,
+          escalationStatus: d.escalationStatus,
+        };
+        if (typeof d.aiHandled === "boolean") next.aiHandled = d.aiHandled;
+        if (d.lastMessageAt) next.lastMessageAt = new Date(d.lastMessageAt);
+        if (d.latestMessage) {
+          next.latestMessage = {
+            ...d.latestMessage,
+            createdAt: new Date(d.latestMessage.createdAt),
+          };
+        }
+        return { ...prev, [d.conversationId]: next };
+      });
     })).catch(() => {});
 
     void Promise.resolve(inboxCh.subscribe("new_conversation", () => {
