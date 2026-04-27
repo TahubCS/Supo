@@ -359,6 +359,12 @@
       '#supo-close { background: none; border: none; cursor: pointer; color: rgba(255,255,255,.8);',
       '  padding: 2px; display: flex; line-height: 1; }',
       '#supo-close:hover { color: #fff; }',
+      '#supo-beta {',
+      '  padding: 7px 14px; border-bottom: 1px solid ' + border + ';',
+      '  background: ' + (isDark ? '#241f13' : '#fffbeb') + ';',
+      '  color: ' + (isDark ? '#facc15' : '#92400e') + ';',
+      '  font-size: 11px; line-height: 1.4; flex-shrink: 0; }',
+      '#supo-beta strong { font-weight: 700; }',
 
       // Waiting for agent — animated dots under the header name
       '#supo-connecting { display: flex; align-items: center; gap: 4px; padding: 6px 14px;',
@@ -484,10 +490,15 @@
     return (
       '<div id="supo-panel" class="' + (isOpen ? '' : 'supo-hidden') + '">' +
       renderHeader() +
+      renderBetaNotice() +
       (customer ? renderChat() : renderIdForm()) +
       '<div id="supo-powered"><a href="https://supo.app" target="_blank" rel="noopener">Powered by Supo</a></div>' +
       '</div>'
     );
+  }
+
+  function renderBetaNotice() {
+    return '<div id="supo-beta"><strong>BETA testing:</strong> this widget is unstable at the moment.</div>';
   }
 
   function renderHeader() {
@@ -673,6 +684,8 @@
     messages.push({ role: 'user', text: text });
 
     var customer = getCustomer();
+    var convId = getConvId(customer);
+    var convToken = getConvToken(customer);
 
     // In agent_active mode the server stores the message and returns a static
     // acknowledgement — no streaming occurs.
