@@ -35,6 +35,7 @@ Supo is organized around five product areas:
 - **Database:** Neon Postgres with Drizzle ORM
 - **Vector Search:** pgvector with Gemini embeddings
 - **AI:** Vercel AI SDK v6 with Google Gemini/Gemma model fallback
+- **Realtime:** Ably with widget polling fallback
 - **Rate Limiting:** Upstash Redis
 - **Email:** Resend
 - **Deployment:** Vercel
@@ -55,9 +56,12 @@ src/app/
       analytics/                   Analytics surface
   api/
     auth/[...all]/                 Better Auth route
+    ably/token                     Short-lived Ably token requests
     chat/                          Public widget chat API
+    chat/escalate                  Widget-to-agent escalation
     knowledge/ingest               Background KB ingestion
     knowledge/query                RAG query endpoint
+    messages/poll                  Widget polling fallback
     cron/sync-knowledge            Daily knowledge sync
 
 src/components/                    Shared app and marketing components
@@ -89,8 +93,11 @@ Supo currently includes early-stage SaaS hardening:
 - Super-admin actions are audited.
 - Admin can view/revoke sessions and ban/unban users.
 - Public auth and chat endpoints are rate limited through Upstash Redis.
+- Public widget conversation reads/subscriptions require `conversationId + conversationToken`.
+- Widget polling is rate limited and rejects invalid `since` timestamps.
 - Proxy-level checks reject oversized chat requests and invalid auth POST requests.
 - Route-level quotas limit expensive AI and knowledge operations.
+- Ably powers realtime inbox/widget updates and gracefully falls back to polling when unavailable.
 - Suspicious new IP/user-agent fingerprints are logged after app auth.
 - Owner alerts are sent for new super-admin fingerprints.
 
@@ -106,35 +113,11 @@ Paid WAF, CAPTCHA, bot-management products, and domain-based email hardening are
 - GitHub OAuth app
 - Google Gemini API key
 - Resend API key
+- Ably API key for realtime features
 
 ## Environment Variables
 
-Create `.env.local` with:
-
-```env
-DATABASE_URL=
-
-BETTER_AUTH_SECRET=
-BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_API_KEY=
-
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
-
-RESEND_API_KEY=
-GOOGLE_GEMINI_API_KEY=
-
-SUPO_SUPER_ADMIN_EMAILS=khatrim23@students.ecu.edu
-BETTER_AUTH_ADMIN_USER_IDS=
-
-UPSTASH_REDIS_REST_URL=
-UPSTASH_REDIS_REST_TOKEN=
-
-# Optional. Use after configuring a verified sender/domain in Resend.
-SECURITY_ALERT_FROM_EMAIL=
-```
+Copy `.env.example` to `.env.local` and fill in the values for your environment.
 
 Notes:
 
@@ -142,6 +125,7 @@ Notes:
 - `BETTER_AUTH_URL` must match the deployed app URL in production.
 - `BETTER_AUTH_ADMIN_USER_IDS` should contain only the trusted owner/admin Better Auth user id.
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
+- `ABLY_API_KEY` enables realtime inbox/widget updates. The widget keeps polling as a fallback if Ably is absent.
 - Resend's `onboarding@resend.dev` sender is only reliable for the Resend account owner's inbox until a verified domain is configured.
 
 ## Local Development
@@ -196,6 +180,8 @@ Current core tables include:
 - Knowledge: `knowledge_source`, `knowledge_suggestion`, `knowledge_chunk`
 - Admin/security: `admin_audit_log`, `security_event`
 
+The latest migration at this release is `0012_conversation_public_access_token`, which adds the widget bearer token used for public conversation access.
+
 Migrations live in:
 
 ```txt
@@ -229,7 +215,9 @@ Use an alpha tag until the product has:
 - A verified production email domain.
 - A clearer billing/usage story.
 - More mature analytics and abuse monitoring.
-- A written security policy and support process.
+- A mature support process for production users.
+
+See `CHANGELOG.md` for release notes and `SECURITY.md` for the current alpha security policy.
 
 ## Repository Notes
 
