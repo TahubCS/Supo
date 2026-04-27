@@ -120,8 +120,13 @@
         if (!data) return;
 
         // Advance state machine based on escalation status from server
-        if (data.escalationStatus === 'active' && widgetState === 'waiting_agent') {
+        if (data.escalationStatus === 'pending' && widgetState !== 'waiting_agent') {
+          widgetState = 'waiting_agent';
+          startPolling();
+          render();
+        } else if (data.escalationStatus === 'active' && widgetState !== 'agent_active') {
           widgetState = 'agent_active';
+          startPolling();
           render();
         } else if (data.escalationStatus === null && widgetState !== 'idle' && widgetState !== 'streaming') {
           // Conversation was resolved/reset — return to idle
@@ -232,8 +237,8 @@
 
             var escalationSub = ch.subscribe('escalation_update', function (msg) {
               var s = msg.data.status;
-              if (s === 'pending')  { widgetState = 'waiting_agent'; render(); }
-              if (s === 'active')   { widgetState = 'agent_active';  render(); }
+              if (s === 'pending')  { widgetState = 'waiting_agent'; startPolling(); render(); }
+              if (s === 'active')   { widgetState = 'agent_active';  startPolling(); render(); }
               if (s === null)       { widgetState = 'idle'; stopPolling(); render(); }
             });
             if (escalationSub && typeof escalationSub.catch === 'function') {
@@ -766,6 +771,7 @@
             var inp = $('#supo-input');
             if (sendBtn) sendBtn.disabled = false;
             if (inp) inp.disabled = false;
+            doPoll();
             return;
           }
           var chunk = decoder.decode(result.value, { stream: true });

@@ -122,6 +122,19 @@ function isValidCustomerEmail(email: string): boolean {
   );
 }
 
+function shouldNotifyAgent(text: string, hasRelevantKnowledge: boolean): boolean {
+  if (!hasRelevantKnowledge) return true;
+
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("human agent") ||
+    lower.includes("live agent") ||
+    lower.includes("support agent") ||
+    lower.includes("connect you") ||
+    lower.includes("speak to")
+  );
+}
+
 export async function POST(req: NextRequest) {
   let body: ChatRequest;
   try {
@@ -476,6 +489,8 @@ export async function POST(req: NextRequest) {
   const modelId = await resolveGenerationModel();
 
   const convId = conv.id;
+  const handoffCustomerName = cust.name;
+  const conversationSubject = conv.subject;
   const result = streamText({
     model: google(modelId),
     system: systemLines,
@@ -483,6 +498,9 @@ export async function POST(req: NextRequest) {
     onFinish: async ({ text }) => {
       const finishAt = new Date();
       const newMsgId = crypto.randomUUID();
+      const notifyAgent = shouldNotifyAgent(text, foundRelevantKnowledge);
+      const nextEscalationStatus = notifyAgent ? "pending" : null;
+      const nextAiHandled = !notifyAgent;
       await db.insert(message).values({
         id: newMsgId,
         conversationId: convId,
@@ -493,7 +511,13 @@ export async function POST(req: NextRequest) {
       });
       await db
         .update(conversation)
-        .set({ lastMessageAt: finishAt, updatedAt: finishAt, aiHandled: true })
+        .set({
+          lastMessageAt: finishAt,
+          updatedAt: finishAt,
+          aiHandled: nextAiHandled,
+          escalationStatus: nextEscalationStatus,
+          escalatedAt: notifyAgent ? finishAt : null,
+        })
         .where(eq(conversation.id, convId));
       // Push AI reply to any agent viewing this conversation in real-time.
       publishToConversation(orgId, convId, "message", {
@@ -505,8 +529,8 @@ export async function POST(req: NextRequest) {
       publishToProductInbox(orgId, productId, "conversation_updated", {
         conversationId: convId,
         status: "open",
-        escalationStatus: null,
-        aiHandled: true,
+        escalationStatus: nextEscalationStatus,
+        aiHandled: nextAiHandled,
         lastMessageAt: finishAt.toISOString(),
         latestMessage: {
           id: newMsgId,
@@ -515,6 +539,20 @@ export async function POST(req: NextRequest) {
           createdAt: finishAt.toISOString(),
         },
       }).catch(() => {});
+      if (notifyAgent) {
+        publishToConversation(orgId, convId, "escalation_update", {
+          status: "pending",
+        }).catch(() => {});
+        publishToProductInbox(orgId, productId, "needs_agent", {
+          conversationId: convId,
+          subject: conversationSubject,
+          customerName: handoffCustomerName,
+          escalatedAt: finishAt.toISOString(),
+          reason: foundRelevantKnowledge
+            ? "The AI response offered human handoff."
+            : "No relevant knowledge matched the customer question.",
+        }).catch(() => {});
+      }
     },
   });
 
