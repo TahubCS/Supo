@@ -4,6 +4,7 @@ import { LayoutDashboard, LogOut, MessageCircle, Settings, ShieldCheck } from "l
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { authClient } from "@/lib/auth-client";
 
 interface WorkspaceSidebarProps {
@@ -114,6 +115,7 @@ export function WorkspaceSidebar({
           >
             <LogOut className="size-4" />
           </button>
+          <ThemeToggle className="size-7 rounded-md border-transparent bg-transparent backdrop-blur-none hover:bg-[color:var(--card-elevated)]" />
         </div>
       </div>
     </aside>
