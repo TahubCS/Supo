@@ -168,7 +168,7 @@ export function Footer() {
             © 2026 Supo. All rights reserved.
           </p>
           <p className="text-xs text-[color:var(--text-tertiary)]">
-            Built with Claude Code
+            Built with Next.js, Tailwind CSS, and a lot of ☕.
           </p>
         </div>
       </div>
