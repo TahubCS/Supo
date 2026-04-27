@@ -34,6 +34,31 @@ function closeAblyClient(client: Ably.Realtime) {
   }
 }
 
+function createAgentAuthCallback(productId: string): NonNullable<Ably.AuthOptions["authCallback"]> {
+  return async (_tokenParams, callback) => {
+    try {
+      const url = new URL("/api/ably/token", window.location.origin);
+      url.searchParams.set("productId", productId);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+
+      if (!response.ok) {
+        callback(`Ably token request failed with status ${response.status}`, null);
+        return;
+      }
+
+      const tokenRequest = (await response.json()) as Ably.TokenRequest;
+      callback(null, tokenRequest);
+    } catch (error) {
+      callback(error instanceof Error ? error.message : "Ably token request failed", null);
+    }
+  };
+}
+
 export function InboxView({
   conversations: initialConversations,
   productId,
@@ -50,14 +75,12 @@ export function InboxView({
   const [conversationUpdates, setConversationUpdates] = useState<
     Record<string, Partial<ConversationWithDetails>>
   >({});
-  const ablyClient = useMemo(
-    () =>
-      new Ably.Realtime({
-        authUrl: `/api/ably/token?productId=${productId}`,
-        authMethod: "GET",
-      }),
-    [productId],
-  );
+  const ablyClient = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    return new Ably.Realtime({
+      authCallback: createAgentAuthCallback(productId),
+    });
+  }, [productId]);
   const conversations = useMemo(
     () =>
       initialConversations
@@ -76,6 +99,12 @@ export function InboxView({
   );
 
   useEffect(() => {
+    if (!ablyClient) return;
+    return () => closeAblyClient(ablyClient);
+  }, [ablyClient]);
+
+  useEffect(() => {
+    if (!ablyClient) return;
     const client = ablyClient;
 
     // Join presence so the widget can show a live agent count.
@@ -156,8 +185,7 @@ export function InboxView({
         // Channel may already be detached during Fast Refresh.
       }
       void Promise.resolve(presenceCh.presence.leave())
-        .catch(() => {})
-        .finally(() => closeAblyClient(client));
+        .catch(() => {});
     };
   }, [ablyClient, productId, orgId, userName, router]);
 
