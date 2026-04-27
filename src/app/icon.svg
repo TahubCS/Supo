@@ -1,0 +1,15 @@
+<svg viewBox="0 0 28 28" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rounded dark background -->
+  <rect width="28" height="28" rx="6" ry="6" fill="#111111"/>
+  <!-- Lucide MessageCircle scaled to ~14px, centered -->
+  <g transform="translate(7, 7) scale(0.583)">
+    <path
+      d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"
+      fill="none"
+      stroke="white"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+  </g>
+</svg>
