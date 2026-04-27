@@ -85,6 +85,13 @@
       "when": 1777508160000,
       "tag": "0011_yielding_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777594560000,
+      "tag": "0012_conversation_public_access_token",
+      "breakpoints": true
     }
   ]
 }

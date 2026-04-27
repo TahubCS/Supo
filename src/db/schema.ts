@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -285,26 +285,33 @@ export const customerRelations = relations(customer, ({ one, many }) => ({
   conversations: many(conversation),
 }));
 
-export const conversation = pgTable("conversation", {
-  id: text("id").primaryKey(),
-  productId: text("product_id")
-    .notNull()
-    .references(() => product.id, { onDelete: "cascade" }),
-  customerId: text("customer_id")
-    .notNull()
-    .references(() => customer.id, { onDelete: "cascade" }),
-  status: text("status").notNull().default("open"),
-  assigneeId: text("assignee_id").references(() => user.id, {
-    onDelete: "set null",
-  }),
-  aiHandled: boolean("ai_handled").notNull().default(true),
-  escalationStatus: text("escalation_status"), // null | "pending" | "active"
-  escalatedAt: timestamp("escalated_at"),
-  subject: text("subject"),
-  lastMessageAt: timestamp("last_message_at").notNull(),
-  createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});
+export const conversation = pgTable(
+  "conversation",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customer.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("open"),
+    assigneeId: text("assignee_id").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    aiHandled: boolean("ai_handled").notNull().default(true),
+    escalationStatus: text("escalation_status"), // null | "pending" | "active"
+    escalatedAt: timestamp("escalated_at"),
+    publicAccessToken: text("public_access_token").notNull(),
+    subject: text("subject"),
+    lastMessageAt: timestamp("last_message_at").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("conversation_public_access_token_idx").on(table.publicAccessToken),
+  ],
+);
 
 export const conversationRelations = relations(conversation, ({ one, many }) => ({
   product: one(product, {
