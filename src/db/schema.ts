@@ -1,6 +1,14 @@
 import { relations } from "drizzle-orm";
-import { boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
+
+export const productRoleEnum = pgEnum("product_role", ["admin", "developer", "agent"]);
+export const productInvitationStatusEnum = pgEnum("product_invitation_status", [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+]);
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -100,6 +108,7 @@ export const userRelations = relations(user, ({ many }) => ({
   accounts: many(account),
   members: many(member),
   invitations: many(invitation),
+  productMembers: many(productMember),
   assignedConversations: many(conversation),
   sentMessages: many(message),
   reviewedKnowledgeSuggestions: many(knowledgeSuggestion),
@@ -197,6 +206,8 @@ export const productRelations = relations(product, ({ one, many }) => ({
   }),
   widgetConfigs: many(widgetConfig),
   conversations: many(conversation),
+  members: many(productMember),
+  invitations: many(productInvitation),
   knowledgeSources: many(knowledgeSource),
   knowledgeSuggestions: many(knowledgeSuggestion),
   securityEvents: many(securityEvent),
@@ -212,8 +223,9 @@ export const productMember = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
-    role: text("role").notNull(),
+    role: productRoleEnum("role").notNull(),
     createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [
     uniqueIndex("product_member_product_user_idx").on(table.productId, table.userId),
@@ -230,13 +242,15 @@ export const productInvitation = pgTable(
       .notNull()
       .references(() => product.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
-    role: text("role").notNull(),
-    status: text("status").notNull(),
+    role: productRoleEnum("role").notNull(),
+    status: productInvitationStatusEnum("status").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
+    acceptedAt: timestamp("accepted_at"),
     inviterId: text("inviter_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
   },
   (table) => [
     uniqueIndex("product_invitation_product_email_idx").on(table.productId, table.email),
