@@ -202,6 +202,65 @@ export const productRelations = relations(product, ({ one, many }) => ({
   securityEvents: many(securityEvent),
 }));
 
+export const productMember = pgTable(
+  "product_member",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("product_member_product_user_idx").on(table.productId, table.userId),
+    index("product_member_user_idx").on(table.userId),
+    index("product_member_product_role_idx").on(table.productId, table.role),
+  ],
+);
+
+export const productInvitation = pgTable(
+  "product_invitation",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    status: text("status").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    inviterId: text("inviter_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("product_invitation_product_email_idx").on(table.productId, table.email),
+    index("product_invitation_product_status_idx").on(table.productId, table.status),
+    index("product_invitation_email_idx").on(table.email),
+  ],
+);
+
+export const productMemberRelations = relations(productMember, ({ one }) => ({
+  product: one(product, {
+    fields: [productMember.productId],
+    references: [product.id],
+  }),
+  user: one(user, { fields: [productMember.userId], references: [user.id] }),
+}));
+
+export const productInvitationRelations = relations(productInvitation, ({ one }) => ({
+  product: one(product, {
+    fields: [productInvitation.productId],
+    references: [product.id],
+  }),
+  inviter: one(user, { fields: [productInvitation.inviterId], references: [user.id] }),
+}));
+
 export const securityEvent = pgTable(
   "security_event",
   {

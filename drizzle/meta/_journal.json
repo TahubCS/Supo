@@ -92,6 +92,13 @@
       "when": 1777594560000,
       "tag": "0012_conversation_public_access_token",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777767360000,
+      "tag": "0013_product_roles",
+      "breakpoints": true
     }
   ]
 }
