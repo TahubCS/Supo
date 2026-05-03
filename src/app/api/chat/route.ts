@@ -335,6 +335,7 @@ export async function POST(req: NextRequest) {
       conversationId: conv.id,
       status: conv.status,
       escalationStatus: conv.escalationStatus,
+      assigneeId: conv.assigneeId,
       aiHandled: conv.aiHandled,
       lastMessageAt: now.toISOString(),
       latestMessage: {
@@ -400,6 +401,7 @@ export async function POST(req: NextRequest) {
     conversationId: conv.id,
     status: conv.status,
     escalationStatus: conv.escalationStatus,
+    assigneeId: conv.assigneeId,
     aiHandled: conv.aiHandled,
     lastMessageAt: now.toISOString(),
     latestMessage: {
@@ -517,6 +519,7 @@ export async function POST(req: NextRequest) {
           aiHandled: nextAiHandled,
           escalationStatus: nextEscalationStatus,
           escalatedAt: notifyAgent ? finishAt : null,
+          assigneeId: notifyAgent ? null : conv.assigneeId,
         })
         .where(eq(conversation.id, convId));
       // Push AI reply to any agent viewing this conversation in real-time.
@@ -530,6 +533,7 @@ export async function POST(req: NextRequest) {
         conversationId: convId,
         status: "open",
         escalationStatus: nextEscalationStatus,
+        assigneeId: notifyAgent ? null : conv.assigneeId,
         aiHandled: nextAiHandled,
         lastMessageAt: finishAt.toISOString(),
         latestMessage: {

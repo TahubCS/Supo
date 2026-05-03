@@ -4,10 +4,10 @@ import { asc, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { conversation, knowledgeSuggestion, member, message } from "@/db/schema";
+import { conversation, knowledgeSuggestion, message } from "@/db/schema";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
-import { auth } from "@/lib/auth";
 import { geminiGenerate } from "@/lib/knowledge/ai";
+import { requireProductAccess, type ProductAccess } from "@/lib/product-access";
 import { requireSecurityQuota } from "@/lib/security";
 
 type MessageRow = typeof message.$inferSelect;
@@ -24,6 +24,7 @@ type LifecycleUpdate = {
   conversationId: string;
   status: string;
   escalationStatus: string | null;
+  assigneeId?: string | null;
   aiHandled?: boolean;
   lastMessageAt?: Date;
   latestMessage?: {
@@ -36,24 +37,24 @@ type LifecycleUpdate = {
 };
 
 async function verifyConversationAccess(conversationId: string) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership) throw new Error("No workspace found");
-
   const conv = await db.query.conversation.findFirst({
     where: eq(conversation.id, conversationId),
     with: { product: true },
   });
   if (!conv) throw new Error("Not found");
-  if (conv.product.organizationId !== membership.organizationId) {
-    throw new Error("Not found");
-  }
 
-  return { session, conv, membership };
+  const access = await requireProductAccess(conv.productId, ["inbox"]);
+  return { ...access, conv };
+}
+
+function assertCanUseConversation(
+  access: ProductAccess,
+  conv: typeof conversation.$inferSelect,
+) {
+  if (access.role !== "agent") return;
+  if (conv.assigneeId !== access.session.user.id) {
+    throw new Error("Join this conversation before viewing or replying");
+  }
 }
 
 function publishConversationLifecycleUpdate({
@@ -62,6 +63,7 @@ function publishConversationLifecycleUpdate({
   conversationId,
   status,
   escalationStatus,
+  assigneeId,
   aiHandled,
   lastMessageAt,
   latestMessage,
@@ -71,6 +73,7 @@ function publishConversationLifecycleUpdate({
     conversationId,
     status,
     escalationStatus,
+    assigneeId,
     aiHandled,
     lastMessageAt: lastMessageAt?.toISOString(),
     latestMessage: latestMessage
@@ -102,21 +105,8 @@ function publishConversationLifecycleUpdate({
 }
 
 export async function getMessages(conversationId: string): Promise<MessageRow[]> {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership) throw new Error("No workspace found");
-
-  const conv = await db.query.conversation.findFirst({
-    where: eq(conversation.id, conversationId),
-    with: { product: true },
-  });
-  if (!conv || conv.product.organizationId !== membership.organizationId) {
-    throw new Error("Not found");
-  }
+  const { conv, ...access } = await verifyConversationAccess(conversationId);
+  assertCanUseConversation(access, conv);
 
   return db.query.message.findMany({
     where: eq(message.conversationId, conversationId),
@@ -125,7 +115,8 @@ export async function getMessages(conversationId: string): Promise<MessageRow[]>
 }
 
 export async function resolveConversation(conversationId: string): Promise<void> {
-  const { conv, membership } = await verifyConversationAccess(conversationId);
+  const { conv, ...access } = await verifyConversationAccess(conversationId);
+  assertCanUseConversation(access, conv);
   const now = new Date();
   await db
     .update(conversation)
@@ -133,7 +124,7 @@ export async function resolveConversation(conversationId: string): Promise<void>
     .where(eq(conversation.id, conversationId));
 
   publishConversationLifecycleUpdate({
-    organizationId: membership.organizationId,
+    organizationId: access.membership.organizationId,
     productId: conv.productId,
     conversationId,
     status: "resolved",
@@ -141,15 +132,18 @@ export async function resolveConversation(conversationId: string): Promise<void>
     notifyWidget: true,
   }).catch(() => {});
 
-  try {
-    await createKnowledgeSuggestionFromConversation(conversationId);
-  } catch {
-    // Conversation resolution must not be blocked by AI extraction failures.
+  if (access.role !== "agent") {
+    try {
+      await createKnowledgeSuggestionFromConversation(conversationId);
+    } catch {
+      // Conversation resolution must not be blocked by AI extraction failures.
+    }
   }
 }
 
 export async function snoozeConversation(conversationId: string): Promise<void> {
-  const { conv, membership } = await verifyConversationAccess(conversationId);
+  const { conv, ...access } = await verifyConversationAccess(conversationId);
+  assertCanUseConversation(access, conv);
   const now = new Date();
   await db
     .update(conversation)
@@ -157,7 +151,7 @@ export async function snoozeConversation(conversationId: string): Promise<void> 
     .where(eq(conversation.id, conversationId));
 
   publishConversationLifecycleUpdate({
-    organizationId: membership.organizationId,
+    organizationId: access.membership.organizationId,
     productId: conv.productId,
     conversationId,
     status: "snoozed",
@@ -167,7 +161,8 @@ export async function snoozeConversation(conversationId: string): Promise<void> 
 }
 
 export async function reopenConversation(conversationId: string): Promise<void> {
-  const { conv, membership } = await verifyConversationAccess(conversationId);
+  const { conv, ...access } = await verifyConversationAccess(conversationId);
+  assertCanUseConversation(access, conv);
   const now = new Date();
   await db
     .update(conversation)
@@ -175,7 +170,7 @@ export async function reopenConversation(conversationId: string): Promise<void> 
     .where(eq(conversation.id, conversationId));
 
   publishConversationLifecycleUpdate({
-    organizationId: membership.organizationId,
+    organizationId: access.membership.organizationId,
     productId: conv.productId,
     conversationId,
     status: "open",
@@ -184,11 +179,52 @@ export async function reopenConversation(conversationId: string): Promise<void> 
   }).catch(() => {});
 }
 
+export async function joinConversation(conversationId: string): Promise<void> {
+  const { session, conv, membership, role } =
+    await verifyConversationAccess(conversationId);
+
+  if (role !== "agent") return;
+  if (conv.assigneeId) throw new Error("This conversation is already assigned");
+  if (conv.escalationStatus !== "pending") {
+    throw new Error("Only pending conversations can be joined");
+  }
+
+  const now = new Date();
+  await db
+    .update(conversation)
+    .set({
+      status: "open",
+      escalationStatus: "active",
+      aiHandled: false,
+      assigneeId: session.user.id,
+      updatedAt: now,
+    })
+    .where(eq(conversation.id, conversationId));
+
+  Promise.allSettled([
+    publishToConversation(membership.organizationId, conversationId, "escalation_update", {
+      status: "active",
+    }),
+    publishConversationLifecycleUpdate({
+      organizationId: membership.organizationId,
+      productId: conv.productId,
+      conversationId,
+      status: "open",
+      escalationStatus: "active",
+      assigneeId: session.user.id,
+      aiHandled: false,
+      notifyWidget: false,
+    }),
+  ]).catch(() => {});
+}
+
 export async function sendMessage(
   conversationId: string,
   body: string,
 ): Promise<void> {
-  const { session, conv, membership } = await verifyConversationAccess(conversationId);
+  const { session, conv, membership, ...access } =
+    await verifyConversationAccess(conversationId);
+  assertCanUseConversation({ session, membership, ...access }, conv);
   const headerList = await headers();
   await requireSecurityQuota("inbox.agent.user.hour", session.user.id, {
     userId: session.user.id,
@@ -240,6 +276,7 @@ export async function sendMessage(
       conversationId,
       status: "open",
       escalationStatus: "active",
+      assigneeId: session.user.id,
       aiHandled: false,
       lastMessageAt: now,
       latestMessage: {
@@ -283,6 +320,7 @@ async function createKnowledgeSuggestionFromConversation(
   conversationId: string,
 ): Promise<SuggestionResult> {
   const { conv } = await verifyConversationAccess(conversationId);
+  await requireProductAccess(conv.productId, ["knowledge"]);
 
   const existing = await db.query.knowledgeSuggestion.findFirst({
     where: eq(knowledgeSuggestion.sourceConversationId, conversationId),

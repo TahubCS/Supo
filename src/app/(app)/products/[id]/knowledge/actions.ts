@@ -4,50 +4,27 @@ import { and, eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { knowledgeSource, knowledgeSuggestion, member, product } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { knowledgeSource, knowledgeSuggestion } from "@/db/schema";
 import { env } from "@/lib/env";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
+import { requireProductAccess } from "@/lib/product-access";
 import { requireSecurityQuota } from "@/lib/security";
 
 async function verifyProductAccess(productId: string) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership) throw new Error("No workspace found");
-
-  const found = await db.query.product.findFirst({
-    where: eq(product.id, productId),
-  });
-  if (!found || found.organizationId !== membership.organizationId) {
-    throw new Error("Not found");
-  }
-
-  return { session, membership };
+  return requireProductAccess(productId, ["knowledge"]);
 }
 
 async function verifySuggestionAccess(suggestionId: string) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-
   const suggestion = await db.query.knowledgeSuggestion.findFirst({
     where: eq(knowledgeSuggestion.id, suggestionId),
-    with: { product: { columns: { id: true, organizationId: true } } },
+    with: { product: { columns: { id: true } } },
   });
   if (!suggestion) throw new Error("Not found");
 
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership || membership.organizationId !== suggestion.product.organizationId) {
-    throw new Error("Not found");
-  }
+  const access = await requireProductAccess(suggestion.product.id, ["knowledge"]);
 
-  return { session, suggestion };
+  return { session: access.session, suggestion };
 }
 
 export type AddSourceInput = {
@@ -113,18 +90,10 @@ export async function addSource(productId: string, input: AddSourceInput): Promi
 export async function deleteSource(sourceId: string): Promise<void> {
   const source = await db.query.knowledgeSource.findFirst({
     where: eq(knowledgeSource.id, sourceId),
-    with: { product: { columns: { organizationId: true } } },
+    with: { product: { columns: { id: true } } },
   });
   if (!source) throw new Error("Not found");
-
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership || membership.organizationId !== source.product.organizationId) {
-    throw new Error("Not found");
-  }
+  await verifyProductAccess(source.product.id);
 
   await db.delete(knowledgeSource).where(eq(knowledgeSource.id, sourceId));
 }
@@ -132,18 +101,11 @@ export async function deleteSource(sourceId: string): Promise<void> {
 export async function reindexSource(sourceId: string): Promise<void> {
   const source = await db.query.knowledgeSource.findFirst({
     where: eq(knowledgeSource.id, sourceId),
-    with: { product: { columns: { organizationId: true, id: true } } },
+    with: { product: { columns: { id: true } } },
   });
   if (!source) throw new Error("Not found");
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership || membership.organizationId !== source.product.organizationId) {
-    throw new Error("Not found");
-  }
+  const { session, membership } = await verifyProductAccess(source.product.id);
   const headerList = await headers();
   await requireSecurityQuota("knowledge.source.user.day", session.user.id, {
     userId: session.user.id,

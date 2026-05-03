@@ -2,7 +2,7 @@
 
 import * as Ably from "ably";
 import { format, isSameDay } from "date-fns";
-import { BookOpen, MessageSquare } from "lucide-react";
+import { BookOpen, MessageSquare, UserCheck } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import type { ProductRole } from "@/lib/product-access";
 
 import {
   closeAblyClient,
@@ -19,6 +20,7 @@ import {
 } from "./ably-client";
 import {
   getMessages,
+  joinConversation,
   learnFromConversation,
   resolveConversation,
   reopenConversation,
@@ -92,10 +94,14 @@ export function ConversationThread({
   conversation,
   productId,
   orgId,
+  currentUserId,
+  productRole,
 }: {
   conversation: ConversationWithDetails | null;
   productId: string;
   orgId: string;
+  currentUserId: string;
+  productRole: ProductRole;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState<MessageRow[]>([]);
@@ -104,6 +110,10 @@ export function ConversationThread({
   const [isPending, startTransition] = useTransition();
   const bottomRef = useRef<HTMLDivElement>(null);
   const conversationId = conversation?.id ?? null;
+  const canViewThread =
+    !conversation ||
+    productRole !== "agent" ||
+    conversation.assigneeId === currentUserId;
   const ablyClient = useMemo(() => {
     if (typeof window === "undefined") return null;
     return new Ably.Realtime({
@@ -120,7 +130,7 @@ export function ConversationThread({
     let cancelled = false;
 
     async function loadMessages() {
-      if (!conversationId) {
+      if (!conversationId || !canViewThread) {
         setMessages([]);
         return;
       }
@@ -138,7 +148,7 @@ export function ConversationThread({
     return () => {
       cancelled = true;
     };
-  }, [conversationId]);
+  }, [canViewThread, conversationId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -146,7 +156,7 @@ export function ConversationThread({
 
   // Subscribe to real-time messages on the conversation channel.
   useEffect(() => {
-    if (!ablyClient || !conversationId) return;
+    if (!ablyClient || !conversationId || !canViewThread) return;
     const ch = ablyClient.channels.get(`org:${orgId}:conversation:${conversationId}`);
 
     function onMessage(msg: Ably.Message) {
@@ -181,7 +191,7 @@ export function ConversationThread({
         // Channel may already be detached during Fast Refresh.
       }
     };
-  }, [ablyClient, conversationId, orgId]);
+  }, [ablyClient, canViewThread, conversationId, orgId]);
 
   if (!conversation) {
     return (
@@ -218,6 +228,14 @@ export function ConversationThread({
     });
   }
 
+  function handleJoin() {
+    if (!conversation) return;
+    startTransition(async () => {
+      await joinConversation(conversation.id);
+      router.refresh();
+    });
+  }
+
   function handleLearn() {
     if (!conversation) return;
     startTransition(async () => {
@@ -247,6 +265,12 @@ export function ConversationThread({
   }
 
   const isResolved = conversation.status === "resolved";
+  const isAgent = productRole === "agent";
+  const canManageConversation = !isAgent || conversation.assigneeId === currentUserId;
+  const isUnassignedPending =
+    isAgent &&
+    conversation.escalationStatus === "pending" &&
+    !conversation.assigneeId;
 
   // Group messages with date separators
   const grouped: Array<{ separator: Date } | { msg: MessageRow }> = [];
@@ -311,19 +335,31 @@ export function ConversationThread({
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {isResolved ? (
+          {isUnassignedPending ? (
+            <Button
+              size="sm"
+              disabled={isPending}
+              onClick={handleJoin}
+              className="gap-1.5 rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
+            >
+              <UserCheck className="size-3.5" />
+              Join
+            </Button>
+          ) : !canManageConversation ? null : isResolved ? (
             <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={isPending}
-                onClick={handleLearn}
-                title="Create knowledge suggestion"
-                className="gap-1.5 rounded-lg text-xs text-[color:var(--text-secondary)] hover:text-foreground"
-              >
-                <BookOpen className="size-3.5" />
-                Learn
-              </Button>
+              {!isAgent && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={handleLearn}
+                  title="Create knowledge suggestion"
+                  className="gap-1.5 rounded-lg text-xs text-[color:var(--text-secondary)] hover:text-foreground"
+                >
+                  <BookOpen className="size-3.5" />
+                  Learn
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -360,7 +396,31 @@ export function ConversationThread({
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto scroll-smooth px-5 py-4">
-        {loadingMessages ? (
+        {isUnassignedPending ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="max-w-sm space-y-3 text-center">
+              <div className="mx-auto flex size-10 items-center justify-center rounded-full border border-border bg-card">
+                <UserCheck className="size-5 text-[color:var(--text-secondary)]" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Join to handle this conversation
+                </p>
+                <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
+                  The full thread unlocks after you claim it, so pending queues stay private between agents.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                disabled={isPending}
+                onClick={handleJoin}
+                className="rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
+              >
+                Join conversation
+              </Button>
+            </div>
+          </div>
+        ) : loadingMessages ? (
           <div className="space-y-4">
             {[false, true, false, true].map((right, i) => (
               <div key={i} className={`flex ${right ? "justify-end" : "justify-start"}`}>
@@ -386,8 +446,8 @@ export function ConversationThread({
         )}
       </div>
 
-      {/* Reply composer */}
-      <div className="border-t border-border px-4 py-3">
+      {canManageConversation && (
+        <div className="border-t border-border px-4 py-3">
         <Textarea
           placeholder="Reply…"
           value={replyBody}
@@ -416,7 +476,8 @@ export function ConversationThread({
             Send
           </Button>
         </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

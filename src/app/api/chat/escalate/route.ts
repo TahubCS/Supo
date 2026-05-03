@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
       escalationStatus: "pending",
       escalatedAt: now,
       aiHandled: false,
+      assigneeId: null,
       updatedAt: now,
     })
     .where(eq(conversation.id, conv.id));
@@ -123,6 +124,13 @@ export async function POST(req: NextRequest) {
       subject: conv.subject,
       customerName: cust.name,
       escalatedAt: now.toISOString(),
+    }),
+    publishToProductInbox(foundProduct.organizationId, productId, "conversation_updated", {
+      conversationId: conv.id,
+      status: "open",
+      escalationStatus: "pending",
+      assigneeId: null,
+      aiHandled: false,
     }),
   ]).catch(() => {});
 

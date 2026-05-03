@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { auth } from "@/lib/auth";
+import { acceptPendingProductInvitationsForUser } from "@/lib/product-invitations";
 import { recordSessionFingerprint } from "@/lib/security";
 
 export default async function AppLayout({
@@ -15,6 +16,10 @@ export default async function AppLayout({
   if (!session.user.emailVerified) {
     redirect(`/verify-email?email=${encodeURIComponent(session.user.email)}`);
   }
+  await acceptPendingProductInvitationsForUser({
+    userId: session.user.id,
+    email: session.user.email,
+  });
   await recordSessionFingerprint({
     userId: session.user.id,
     email: session.user.email,

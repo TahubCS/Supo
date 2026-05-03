@@ -4,9 +4,10 @@ import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { knowledgeSource, member, product } from "@/db/schema";
+import { knowledgeSource, member, product, productMember } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { isWorkspaceOwnerRole } from "@/lib/product-access";
 
 export interface CreateProductValues {
   name: string;
@@ -25,6 +26,9 @@ export async function createProduct(
     where: eq(member.userId, session.user.id),
   });
   if (!membership) throw new Error("No workspace found");
+  if (!isWorkspaceOwnerRole(membership.role) && membership.role !== "admin") {
+    throw new Error("Only workspace admins can create products");
+  }
 
   const now = new Date();
   const id = crypto.randomUUID();
@@ -38,6 +42,14 @@ export async function createProduct(
     url: values.url || null,
     createdAt: now,
     updatedAt: now,
+  });
+
+  await db.insert(productMember).values({
+    id: crypto.randomUUID(),
+    productId: id,
+    userId: session.user.id,
+    role: "admin",
+    createdAt: now,
   });
 
   // Auto-bootstrap: if a URL is provided, create a sitemap source and kick off crawl immediately

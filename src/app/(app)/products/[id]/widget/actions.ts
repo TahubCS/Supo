@@ -1,11 +1,8 @@
 "use server";
 
-import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
-
 import { db } from "@/db";
-import { member, product, widgetConfig } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { widgetConfig } from "@/db/schema";
+import { requireProductAccess } from "@/lib/product-access";
 
 export interface WidgetConfigValues {
   botName: string;
@@ -19,20 +16,7 @@ export async function saveWidgetConfig(
   productId: string,
   values: WidgetConfigValues,
 ) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) throw new Error("Unauthorized");
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership) throw new Error("No workspace found");
-
-  const owned = await db.query.product.findFirst({
-    where: eq(product.id, productId),
-  });
-  if (!owned || owned.organizationId !== membership.organizationId) {
-    throw new Error("Not found");
-  }
+  await requireProductAccess(productId, ["widget"]);
 
   const now = new Date();
 

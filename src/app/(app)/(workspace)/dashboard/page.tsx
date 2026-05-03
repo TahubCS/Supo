@@ -1,11 +1,12 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { BarChart2, BookOpen, Code2, MessageSquare, Plus } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
 
 import { db } from "@/db";
-import { member, product } from "@/db/schema";
+import { member, product, productMember } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { isWorkspaceOwnerRole } from "@/lib/product-access";
 
 import { NewProductDialog } from "./NewProductDialog";
 
@@ -26,10 +27,33 @@ export default async function DashboardPage() {
   });
   if (!membership) return null;
 
-  const products = await db.query.product.findMany({
-    where: eq(product.organizationId, membership.organizationId),
-    orderBy: (p, { asc }) => [asc(p.createdAt)],
-  });
+  const isWorkspaceOwner = isWorkspaceOwnerRole(membership.role);
+  const canCreateProducts = isWorkspaceOwner || membership.role === "admin";
+  const products = isWorkspaceOwner
+    ? (await db.query.product.findMany({
+        where: eq(product.organizationId, membership.organizationId),
+        orderBy: (p, { asc }) => [asc(p.createdAt)],
+      })).map((p) => ({ ...p, role: "admin" }))
+    : await db
+        .select({
+          id: product.id,
+          organizationId: product.organizationId,
+          name: product.name,
+          description: product.description,
+          category: product.category,
+          url: product.url,
+          embeddingModel: product.embeddingModel,
+          createdAt: product.createdAt,
+          updatedAt: product.updatedAt,
+          role: productMember.role,
+        })
+        .from(productMember)
+        .innerJoin(product, eq(product.id, productMember.productId))
+        .where(and(
+          eq(productMember.userId, session.user.id),
+          eq(product.organizationId, membership.organizationId),
+        ))
+        .orderBy(product.createdAt);
 
   return (
     <div className="px-8 py-8">
@@ -42,7 +66,7 @@ export default async function DashboardPage() {
             Products
           </h1>
         </div>
-        <NewProductDialog />
+        {canCreateProducts ? <NewProductDialog /> : null}
       </div>
 
       {products.length === 0 ? (
@@ -57,7 +81,7 @@ export default async function DashboardPage() {
             Create your first product to start configuring your AI support
             widget, knowledge base, and inbox.
           </p>
-          <NewProductDialog />
+          {canCreateProducts ? <NewProductDialog /> : null}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -89,27 +113,33 @@ export default async function DashboardPage() {
                   <MessageSquare className="size-3" />
                   Inbox
                 </Link>
-                <Link
-                  href={`/products/${p.id}/knowledge`}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-background hover:text-foreground"
-                >
-                  <BookOpen className="size-3" />
-                  Knowledge
-                </Link>
-                <Link
-                  href={`/products/${p.id}/widget`}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-background hover:text-foreground"
-                >
-                  <Code2 className="size-3" />
-                  Widget
-                </Link>
-                <Link
-                  href={`/products/${p.id}/analytics`}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-background hover:text-foreground"
-                >
-                  <BarChart2 className="size-3" />
-                  Analytics
-                </Link>
+                {p.role !== "agent" ? (
+                  <>
+                    <Link
+                      href={`/products/${p.id}/knowledge`}
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-background hover:text-foreground"
+                    >
+                      <BookOpen className="size-3" />
+                      Knowledge
+                    </Link>
+                    <Link
+                      href={`/products/${p.id}/widget`}
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-background hover:text-foreground"
+                    >
+                      <Code2 className="size-3" />
+                      Widget
+                    </Link>
+                  </>
+                ) : null}
+                {p.role === "admin" ? (
+                  <Link
+                    href={`/products/${p.id}/analytics`}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-background hover:text-foreground"
+                  >
+                    <BarChart2 className="size-3" />
+                    Analytics
+                  </Link>
+                ) : null}
               </div>
             </div>
           ))}

@@ -1,10 +1,10 @@
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
+import { notFound } from "next/navigation";
 
 import { db } from "@/db";
 import { widgetConfig } from "@/db/schema";
-import { auth } from "@/lib/auth";
 import { env } from "@/lib/env";
+import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
 import { WidgetConfigurator } from "./WidgetConfigurator";
 
@@ -22,8 +22,8 @@ export default async function WidgetPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return null;
+  const access = await getProductAccess(id);
+  if (!access || !canAccessProductCapability(access.role, "widget")) notFound();
 
   const existing = await db.query.widgetConfig.findFirst({
     where: eq(widgetConfig.productId, id),

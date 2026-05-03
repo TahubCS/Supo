@@ -1,10 +1,9 @@
 import { and, count, eq, gte, sql } from "drizzle-orm";
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { db } from "@/db";
-import { conversation, member, product } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { conversation } from "@/db/schema";
+import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
 import { AnalyticsDashboard } from "./AnalyticsDashboard";
 
@@ -15,20 +14,8 @@ export default async function AnalyticsPage({
 }) {
   const { id } = await params;
 
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return null;
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership) notFound();
-
-  const foundProduct = await db.query.product.findFirst({
-    where: eq(product.id, id),
-  });
-  if (!foundProduct || foundProduct.organizationId !== membership.organizationId) {
-    notFound();
-  }
+  const access = await getProductAccess(id);
+  if (!access || !canAccessProductCapability(access.role, "analytics")) notFound();
 
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);

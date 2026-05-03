@@ -5,20 +5,26 @@ import {
   BookOpen,
   ChevronLeft,
   Code2,
+  FileText,
   LogOut,
   MessageSquare,
+  MousePointerClick,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { authClient } from "@/lib/auth-client";
+import type { ProductRole } from "@/lib/product-access";
 
 interface ProductSidebarProps {
   userName: string;
   userEmail: string;
   productId: string;
   productName: string;
+  role: ProductRole;
+  isWorkspaceOwner: boolean;
 }
 
 export function ProductSidebar({
@@ -26,6 +32,8 @@ export function ProductSidebar({
   userEmail,
   productId,
   productName,
+  role,
+  isWorkspaceOwner,
 }: ProductSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -39,11 +47,21 @@ export function ProductSidebar({
   const base = `/products/${productId}`;
 
   const navItems = [
-    { href: `${base}/inbox`, icon: MessageSquare, label: "Inbox" },
-    { href: `${base}/knowledge`, icon: BookOpen, label: "Knowledge" },
-    { href: `${base}/widget`, icon: Code2, label: "Widget" },
-    { href: `${base}/analytics`, icon: BarChart2, label: "Analytics" },
-  ];
+    { href: `${base}/inbox`, icon: MessageSquare, label: "Conversations", roles: ["admin", "developer", "agent"] },
+    { href: `${base}/activity`, icon: MousePointerClick, label: "User activity", roles: ["admin", "developer", "agent"] },
+    { href: `${base}/knowledge`, icon: BookOpen, label: "Knowledge", roles: ["admin", "developer"] },
+    { href: `${base}/widget`, icon: Code2, label: "Widget", roles: ["admin", "developer"] },
+    { href: `${base}/docs`, icon: FileText, label: "Developer docs", roles: ["admin", "developer"] },
+    { href: `${base}/analytics`, icon: BarChart2, label: "Analytics", roles: ["admin"] },
+    ...(isWorkspaceOwner
+      ? [{ href: `${base}/team`, icon: Users, label: "Product team", roles: ["admin"] as ProductRole[] }]
+      : []),
+  ] satisfies Array<{
+    href: string;
+    icon: typeof MessageSquare;
+    label: string;
+    roles: ProductRole[];
+  }>;
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
@@ -69,7 +87,7 @@ export function ProductSidebar({
       </div>
 
       <nav className="flex-1 space-y-0.5 p-2 pt-3">
-        {navItems.map((item) => (
+        {navItems.filter((item) => item.roles.includes(role)).map((item) => (
           <Link
             key={item.href}
             href={item.href}

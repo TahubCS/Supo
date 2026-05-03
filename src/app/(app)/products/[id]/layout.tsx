@@ -1,11 +1,7 @@
-import { and, eq } from "drizzle-orm";
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { ProductSidebar } from "@/components/ProductSidebar";
-import { db } from "@/db";
-import { member, product } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { getProductAccess } from "@/lib/product-access";
 
 export default async function ProductLayout({
   children,
@@ -15,29 +11,18 @@ export default async function ProductLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) return null;
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership) notFound();
-
-  const foundProduct = await db.query.product.findFirst({
-    where: and(
-      eq(product.id, id),
-      eq(product.organizationId, membership.organizationId),
-    ),
-  });
-  if (!foundProduct) notFound();
+  const access = await getProductAccess(id);
+  if (!access) notFound();
 
   return (
     <div className="flex min-h-screen bg-background">
       <ProductSidebar
-        userName={session.user.name}
-        userEmail={session.user.email}
+        userName={access.session.user.name}
+        userEmail={access.session.user.email}
         productId={id}
-        productName={foundProduct.name}
+        productName={access.product.name}
+        role={access.role}
+        isWorkspaceOwner={access.isWorkspaceOwner}
       />
       <main className="flex-1 overflow-auto scroll-smooth">{children}</main>
     </div>

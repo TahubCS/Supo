@@ -12,6 +12,7 @@ import {
 import { ConversationList } from "./ConversationList";
 import { ConversationThread } from "./ConversationThread";
 import type { ConversationWithDetails } from "./types";
+import type { ProductRole } from "@/lib/product-access";
 
 function playNotificationSound() {
   try {
@@ -36,11 +37,15 @@ export function InboxView({
   productId,
   orgId,
   userName,
+  currentUserId,
+  productRole,
 }: {
   conversations: ConversationWithDetails[];
   productId: string;
   orgId: string;
   userName: string;
+  currentUserId: string;
+  productRole: ProductRole;
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -60,8 +65,15 @@ export function InboxView({
             latestMessage: update.latestMessage ?? conversation.latestMessage,
           };
         })
+        .filter((conversation) => {
+          if (productRole !== "agent") return true;
+          return (
+            conversation.assigneeId === currentUserId ||
+            (conversation.escalationStatus === "pending" && !conversation.assigneeId)
+          );
+        })
         .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime()),
-    [initialConversations, conversationUpdates],
+    [currentUserId, initialConversations, productRole, conversationUpdates],
   );
 
   useEffect(() => {
@@ -108,6 +120,7 @@ export function InboxView({
         status: string;
         escalationStatus: string | null;
         aiHandled?: boolean;
+        assigneeId?: string | null;
         lastMessageAt?: string;
         latestMessage?: {
           id: string;
@@ -123,6 +136,7 @@ export function InboxView({
           escalationStatus: d.escalationStatus,
         };
         if (typeof d.aiHandled === "boolean") next.aiHandled = d.aiHandled;
+        if ("assigneeId" in d) next.assigneeId = d.assigneeId ?? null;
         if (d.lastMessageAt) next.lastMessageAt = new Date(d.lastMessageAt);
         if (d.latestMessage) {
           next.latestMessage = {
@@ -177,6 +191,8 @@ export function InboxView({
         conversation={selectedConversation}
         productId={productId}
         orgId={orgId}
+        currentUserId={currentUserId}
+        productRole={productRole}
       />
     </div>
   );
