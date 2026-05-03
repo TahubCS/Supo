@@ -52,15 +52,16 @@ export async function acceptPendingProductInvitationsForUser({
         userId,
         role: invite.role,
         createdAt: now,
+        updatedAt: now,
       })
       .onConflictDoUpdate({
         target: [productMember.productId, productMember.userId],
-        set: { role: invite.role },
+        set: { role: invite.role, updatedAt: now },
       });
 
     await db
       .update(productInvitation)
-      .set({ status: "accepted" })
+      .set({ status: "accepted", acceptedAt: now, updatedAt: now })
       .where(eq(productInvitation.id, invite.id));
   }
 }

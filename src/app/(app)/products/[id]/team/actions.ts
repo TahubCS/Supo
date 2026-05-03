@@ -11,6 +11,12 @@ import {
   requireProductAccess,
   type ProductRole,
 } from "@/lib/product-access";
+import { sendProductInviteEmail } from "@/lib/product-invite-email";
+
+type AssignProductRoleResult = {
+  kind: "assigned" | "invited";
+  emailSent: boolean;
+};
 
 function normalizeEmail(value: FormDataEntryValue | null): string {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -27,7 +33,7 @@ async function requireWorkspaceOwner(productId: string) {
 export async function assignProductRole(
   productId: string,
   formData: FormData,
-): Promise<void> {
+): Promise<AssignProductRoleResult> {
   const access = await requireWorkspaceOwner(productId);
   const email = normalizeEmail(formData.get("email"));
   const roleValue = formData.get("role");
@@ -41,6 +47,7 @@ export async function assignProductRole(
     where: eq(user.email, email),
   });
   const now = new Date();
+  let kind: AssignProductRoleResult["kind"] = "invited";
 
   if (targetUser) {
     const orgMember = await db.query.member.findFirst({
@@ -59,11 +66,13 @@ export async function assignProductRole(
           userId: targetUser.id,
           role,
           createdAt: now,
+          updatedAt: now,
         })
         .onConflictDoUpdate({
           target: [productMember.productId, productMember.userId],
-          set: { role },
+          set: { role, updatedAt: now },
         });
+      kind = "assigned";
     } else {
       await upsertPendingInvitation(productId, email, role, access.session.user.id, now);
     }
@@ -71,7 +80,15 @@ export async function assignProductRole(
     await upsertPendingInvitation(productId, email, role, access.session.user.id, now);
   }
 
+  const emailSent = await sendProductInviteEmail({
+    to: email,
+    inviterName: access.session.user.name,
+    productName: access.product.name,
+    role,
+  });
+
   revalidatePath(`/products/${productId}/team`);
+  return { kind, emailSent };
 }
 
 async function upsertPendingInvitation(
@@ -90,8 +107,10 @@ async function upsertPendingInvitation(
       role,
       status: "pending",
       expiresAt: new Date(now.getTime() + 1000 * 60 * 60 * 24 * 7),
+      acceptedAt: null,
       inviterId,
       createdAt: now,
+      updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [productInvitation.productId, productInvitation.email],
@@ -99,7 +118,9 @@ async function upsertPendingInvitation(
         role,
         status: "pending",
         expiresAt: new Date(now.getTime() + 1000 * 60 * 60 * 24 * 7),
+        acceptedAt: null,
         inviterId,
+        updatedAt: now,
       },
     });
 }

@@ -29,10 +29,18 @@ export function ProductRoleForm({ productId }: { productId: string }) {
         formData.set("role", role);
         startTransition(async () => {
           try {
-            await assignProductRole(productId, formData);
+            const result = await assignProductRole(productId, formData);
             event.currentTarget.reset();
             setRole("agent");
-            toast.success("Product role updated");
+            toast.success(
+              result.emailSent
+                ? result.kind === "assigned"
+                  ? "Product role updated and email sent"
+                  : "Invite saved and email sent"
+                : result.kind === "assigned"
+                  ? "Product role updated; email delivery was skipped"
+                  : "Invite saved; email delivery was skipped",
+            );
           } catch (error) {
             toast.error(error instanceof Error ? error.message : "Failed to update role");
           }

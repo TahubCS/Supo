@@ -50,6 +50,7 @@ export async function createProduct(
     userId: session.user.id,
     role: "admin",
     createdAt: now,
+    updatedAt: now,
   });
 
   // Auto-bootstrap: if a URL is provided, create a sitemap source and kick off crawl immediately
