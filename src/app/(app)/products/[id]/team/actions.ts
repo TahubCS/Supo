@@ -11,11 +11,14 @@ import {
   requireProductAccess,
   type ProductRole,
 } from "@/lib/product-access";
-import { sendProductInviteEmail } from "@/lib/product-invite-email";
+import {
+  sendProductInviteEmail,
+  type ProductInviteEmailResult,
+} from "@/lib/product-invite-email";
 
 type AssignProductRoleResult = {
   kind: "assigned" | "invited";
-  emailSent: boolean;
+  email: ProductInviteEmailResult;
 };
 
 function normalizeEmail(value: FormDataEntryValue | null): string {
@@ -80,7 +83,7 @@ export async function assignProductRole(
     await upsertPendingInvitation(productId, email, role, access.session.user.id, now);
   }
 
-  const emailSent = await sendProductInviteEmail({
+  const email = await sendProductInviteEmail({
     to: email,
     inviterName: access.session.user.name,
     productName: access.product.name,
@@ -88,7 +91,7 @@ export async function assignProductRole(
   });
 
   revalidatePath(`/products/${productId}/team`);
-  return { kind, emailSent };
+  return { kind, email };
 }
 
 async function upsertPendingInvitation(
@@ -137,6 +140,96 @@ export async function removeProductMember(
   await db
     .delete(productMember)
     .where(and(eq(productMember.productId, productId), eq(productMember.userId, userId)));
+
+  revalidatePath(`/products/${productId}/team`);
+}
+
+export async function updateProductMemberRole(
+  productId: string,
+  userId: string,
+  role: ProductRole,
+): Promise<void> {
+  const access = await requireWorkspaceOwner(productId);
+  if (!isProductRole(role)) throw new Error("Invalid product role");
+  if (userId === access.session.user.id) {
+    throw new Error("You cannot change your own product role");
+  }
+
+  const now = new Date();
+  const existing = await db.query.productMember.findFirst({
+    where: and(eq(productMember.productId, productId), eq(productMember.userId, userId)),
+  });
+  if (!existing) throw new Error("Product member not found");
+
+  await db
+    .update(productMember)
+    .set({ role, updatedAt: now })
+    .where(and(eq(productMember.productId, productId), eq(productMember.userId, userId)));
+
+  revalidatePath(`/products/${productId}/team`);
+}
+
+export async function resendProductInvitation(
+  productId: string,
+  invitationId: string,
+): Promise<{ email: ProductInviteEmailResult }> {
+  const access = await requireWorkspaceOwner(productId);
+  const invite = await db.query.productInvitation.findFirst({
+    where: and(
+      eq(productInvitation.id, invitationId),
+      eq(productInvitation.productId, productId),
+    ),
+  });
+  if (!invite) throw new Error("Invitation not found");
+  if (invite.status === "accepted") throw new Error("Accepted invitations cannot be resent");
+  if (!isProductRole(invite.role)) throw new Error("Invalid invitation role");
+
+  const now = new Date();
+  await db
+    .update(productInvitation)
+    .set({
+      status: "pending",
+      expiresAt: new Date(now.getTime() + 1000 * 60 * 60 * 24 * 7),
+      acceptedAt: null,
+      inviterId: access.session.user.id,
+      updatedAt: now,
+    })
+    .where(eq(productInvitation.id, invitationId));
+
+  const email = await sendProductInviteEmail({
+    to: invite.email,
+    inviterName: access.session.user.name,
+    productName: access.product.name,
+    role: invite.role,
+  });
+
+  revalidatePath(`/products/${productId}/team`);
+  return { email };
+}
+
+export async function revokeProductInvitation(
+  productId: string,
+  invitationId: string,
+): Promise<void> {
+  await requireWorkspaceOwner(productId);
+  const now = new Date();
+  const invite = await db.query.productInvitation.findFirst({
+    where: and(
+      eq(productInvitation.id, invitationId),
+      eq(productInvitation.productId, productId),
+    ),
+  });
+  if (!invite) throw new Error("Invitation not found");
+  if (invite.status === "accepted") throw new Error("Accepted invitations cannot be revoked");
+
+  await db
+    .update(productInvitation)
+    .set({
+      status: "revoked",
+      expiresAt: now,
+      updatedAt: now,
+    })
+    .where(eq(productInvitation.id, invitationId));
 
   revalidatePath(`/products/${productId}/team`);
 }

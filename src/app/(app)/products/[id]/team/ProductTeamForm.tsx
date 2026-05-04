@@ -13,8 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { ProductRole } from "@/lib/product-access";
 
-import { assignProductRole, removeProductMember } from "./actions";
+import {
+  assignProductRole,
+  removeProductMember,
+  resendProductInvitation,
+  revokeProductInvitation,
+  updateProductMemberRole,
+} from "./actions";
 
 export function ProductRoleForm({ productId }: { productId: string }) {
   const [role, setRole] = useState("agent");
@@ -115,5 +122,108 @@ export function RemoveProductMemberButton({
     >
       Remove
     </Button>
+  );
+}
+
+export function ProductMemberRoleSelect({
+  productId,
+  userId,
+  currentRole,
+  disabled,
+}: {
+  productId: string;
+  userId: string;
+  currentRole: ProductRole;
+  disabled: boolean;
+}) {
+  const [role, setRole] = useState<ProductRole>(currentRole);
+  const [isPending, startTransition] = useTransition();
+
+  return (
+    <Select
+      value={role}
+      disabled={disabled || isPending}
+      onValueChange={(nextRole) => {
+        const typedRole = nextRole as ProductRole;
+        setRole(typedRole);
+        startTransition(async () => {
+          try {
+            await updateProductMemberRole(productId, userId, typedRole);
+            toast.success("Product role updated");
+          } catch (error) {
+            setRole(currentRole);
+            toast.error(error instanceof Error ? error.message : "Failed to update role");
+          }
+        });
+      }}
+    >
+      <SelectTrigger className="h-8 w-32 rounded-lg text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="admin">Admin</SelectItem>
+        <SelectItem value="developer">Developer</SelectItem>
+        <SelectItem value="agent">Agent</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+export function PendingInviteActions({
+  productId,
+  invitationId,
+  status,
+}: {
+  productId: string;
+  invitationId: string;
+  status: string;
+}) {
+  const [isPending, startTransition] = useTransition();
+  const canResend = status !== "accepted";
+  const canRevoke = status === "pending";
+
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={!canResend || isPending}
+        onClick={() => {
+          startTransition(async () => {
+            try {
+              const result = await resendProductInvitation(productId, invitationId);
+              toast.success(
+                result.emailSent
+                  ? "Invitation resent"
+                  : "Invitation refreshed; email delivery was skipped",
+              );
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Failed to resend invite");
+            }
+          });
+        }}
+        className="rounded-lg text-xs text-[color:var(--text-secondary)] hover:text-foreground"
+      >
+        Resend
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={!canRevoke || isPending}
+        onClick={() => {
+          startTransition(async () => {
+            try {
+              await revokeProductInvitation(productId, invitationId);
+              toast.success("Invitation revoked");
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Failed to revoke invite");
+            }
+          });
+        }}
+        className="rounded-lg text-xs text-[color:var(--text-secondary)] hover:text-foreground"
+      >
+        Revoke
+      </Button>
+    </div>
   );
 }

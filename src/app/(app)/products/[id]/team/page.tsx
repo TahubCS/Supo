@@ -5,9 +5,14 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { db } from "@/db";
 import { productInvitation, productMember } from "@/db/schema";
-import { getProductAccess, isWorkspaceOwnerRole } from "@/lib/product-access";
+import { getProductAccess, isProductRole, isWorkspaceOwnerRole } from "@/lib/product-access";
 
-import { ProductRoleForm, RemoveProductMemberButton } from "./ProductTeamForm";
+import {
+  PendingInviteActions,
+  ProductMemberRoleSelect,
+  ProductRoleForm,
+  RemoveProductMemberButton,
+} from "./ProductTeamForm";
 
 export default async function ProductTeamPage({
   params,
@@ -69,9 +74,18 @@ export default async function ProductTeamPage({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="rounded-full text-xs">
-                    {member.role}
-                  </Badge>
+                  {isProductRole(member.role) ? (
+                    <ProductMemberRoleSelect
+                      productId={id}
+                      userId={member.userId}
+                      currentRole={member.role}
+                      disabled={member.userId === access.session.user.id}
+                    />
+                  ) : (
+                    <Badge variant="outline" className="rounded-full text-xs">
+                      {member.role}
+                    </Badge>
+                  )}
                   {member.userId !== access.session.user.id && (
                     <RemoveProductMemberButton productId={id} userId={member.userId} />
                   )}
@@ -85,12 +99,12 @@ export default async function ProductTeamPage({
       <section className="rounded-lg border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-5 py-4">
           <UserPlus className="size-4 text-[color:var(--text-secondary)]" />
-          <h2 className="text-sm font-medium text-foreground">Pending invitations</h2>
+          <h2 className="text-sm font-medium text-foreground">Invitations</h2>
         </div>
         <div className="divide-y divide-border">
           {invitations.length === 0 ? (
             <div className="px-5 py-8 text-sm text-[color:var(--text-secondary)]">
-              No pending product invitations.
+              No product invitations.
             </div>
           ) : (
             invitations.map((invite) => (
@@ -103,9 +117,22 @@ export default async function ProductTeamPage({
                     Expires {invite.expiresAt.toLocaleDateString()}
                   </p>
                 </div>
-                <Badge variant="outline" className="rounded-full text-xs">
-                  {invite.role}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="rounded-full text-xs">
+                    {invite.role}
+                  </Badge>
+                  <Badge
+                    variant="outline"
+                    className="rounded-full text-xs text-[color:var(--text-secondary)]"
+                  >
+                    {invite.status}
+                  </Badge>
+                  <PendingInviteActions
+                    productId={id}
+                    invitationId={invite.id}
+                    status={invite.status}
+                  />
+                </div>
               </div>
             ))
           )}
