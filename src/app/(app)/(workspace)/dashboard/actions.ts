@@ -22,13 +22,13 @@ export async function createProduct(
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) throw new Error("Unauthorized");
 
-  const membership = await db.query.member.findFirst({
+  const memberships = await db.query.member.findMany({
     where: eq(member.userId, session.user.id),
   });
-  if (!membership) throw new Error("No workspace found");
-  if (!isWorkspaceOwnerRole(membership.role) && membership.role !== "admin") {
-    throw new Error("Only workspace admins can create products");
-  }
+  const membership = memberships.find(
+    (item) => isWorkspaceOwnerRole(item.role) || item.role === "admin",
+  );
+  if (!membership) throw new Error("Only workspace admins can create products");
 
   const now = new Date();
   const id = crypto.randomUUID();

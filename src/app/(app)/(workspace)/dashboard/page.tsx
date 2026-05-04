@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { BarChart2, BookOpen, Code2, MessageSquare, Plus } from "lucide-react";
 import { headers } from "next/headers";
 import Link from "next/link";
@@ -22,38 +22,63 @@ export default async function DashboardPage() {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) return null;
 
-  const membership = await db.query.member.findFirst({
+  const memberships = await db.query.member.findMany({
     where: eq(member.userId, session.user.id),
   });
-  if (!membership) return null;
+  if (memberships.length === 0) return null;
 
-  const isWorkspaceOwner = isWorkspaceOwnerRole(membership.role);
-  const canCreateProducts = isWorkspaceOwner || membership.role === "admin";
-  const products = isWorkspaceOwner
-    ? (await db.query.product.findMany({
-        where: eq(product.organizationId, membership.organizationId),
-        orderBy: (p, { asc }) => [asc(p.createdAt)],
-      })).map((p) => ({ ...p, role: "admin" }))
-    : await db
-        .select({
-          id: product.id,
-          organizationId: product.organizationId,
-          name: product.name,
-          description: product.description,
-          category: product.category,
-          url: product.url,
-          embeddingModel: product.embeddingModel,
-          createdAt: product.createdAt,
-          updatedAt: product.updatedAt,
-          role: productMember.role,
+  const manageableOrgIds = memberships
+    .filter((item) => isWorkspaceOwnerRole(item.role) || item.role === "admin")
+    .map((item) => item.organizationId);
+  const canCreateProducts = manageableOrgIds.length > 0;
+
+  const [workspaceProducts, assignedProducts] = await Promise.all([
+    manageableOrgIds.length > 0
+      ? db.query.product.findMany({
+          where: inArray(product.organizationId, manageableOrgIds),
+          orderBy: (p, { asc }) => [asc(p.createdAt)],
         })
-        .from(productMember)
-        .innerJoin(product, eq(product.id, productMember.productId))
-        .where(and(
-          eq(productMember.userId, session.user.id),
-          eq(product.organizationId, membership.organizationId),
-        ))
-        .orderBy(product.createdAt);
+      : [],
+    db
+      .select({
+        id: product.id,
+        organizationId: product.organizationId,
+        name: product.name,
+        description: product.description,
+        category: product.category,
+        url: product.url,
+        embeddingModel: product.embeddingModel,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+        role: productMember.role,
+      })
+      .from(productMember)
+      .innerJoin(product, eq(product.id, productMember.productId))
+      .where(eq(productMember.userId, session.user.id))
+      .orderBy(product.createdAt),
+  ]);
+
+  const roleRank = { agent: 1, developer: 2, admin: 3 } as const;
+  const productMap = new Map<
+    string,
+    (typeof assignedProducts)[number] & { role: "admin" | "developer" | "agent" }
+  >();
+
+  for (const item of workspaceProducts) {
+    productMap.set(item.id, { ...item, role: "admin" });
+  }
+
+  for (const item of assignedProducts) {
+    const role = item.role;
+    const existing = productMap.get(item.id);
+    if (!existing || roleRank[role] > roleRank[existing.role]) {
+      productMap.set(item.id, { ...item, role });
+    }
+  }
+
+  const products = Array.from(productMap.values()).sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+  );
 
   return (
     <div className="px-8 py-8">
