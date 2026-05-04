@@ -105,7 +105,7 @@ interface WidgetConfiguratorProps {
   widgetUrl: string;
 }
 
-type IntegrationTab = "html" | "react" | "nextjs" | "vue" | "angular";
+type IntegrationTab = "html" | "nextjs" | "react" | "cms";
 
 export function WidgetConfigurator({
   productId,
@@ -130,70 +130,72 @@ export function WidgetConfigurator({
   };
 
   const TABS: { id: IntegrationTab; label: string }[] = [
-    { id: "html",    label: "HTML" },
-    { id: "react",   label: "React" },
-    { id: "nextjs",  label: "Next.js" },
-    { id: "vue",     label: "Vue" },
-    { id: "angular", label: "Angular" },
+    { id: "html", label: "HTML" },
+    { id: "nextjs", label: "Next.js" },
+    { id: "react", label: "React/Vite" },
+    { id: "cms", label: "CMS" },
   ];
 
   const snippets: Record<IntegrationTab, string> = {
-    html: `<!-- Paste before </body> on every page -->
+    html: `<!-- Place once before </body> on every page where support should be available. -->
 <script>
-  window.SupoSettings = { productId: "${productId}" };
+  window.SupoSettings = {
+    productId: "${productId}"
+  };
 </script>
 <script src="${widgetUrl}" async></script>`,
 
-    react: `// Add to your root component or _app.tsx
+    nextjs: `// app/layout.tsx
+import Script from 'next/script';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        {children}
+
+        {/* Load once in the root layout. Do not add this on every route/page. */}
+        <Script id="supo-settings" strategy="beforeInteractive">
+          {\`window.SupoSettings = { productId: "${productId}" };\`}
+        </Script>
+        <Script src="${widgetUrl}" strategy="afterInteractive" />
+      </body>
+    </html>
+  );
+}`,
+
+    react: `// SupoWidgetLoader.tsx
 import { useEffect } from 'react';
 
-export function SupoWidget() {
+export function SupoWidgetLoader() {
   useEffect(() => {
-    window.SupoSettings = { productId: '${productId}' };
+    if (document.getElementById('supo-widget-script')) return;
+
+    (window as Window & { SupoSettings?: { productId: string } }).SupoSettings = {
+      productId: '${productId}'
+    };
+
     const s = document.createElement('script');
+    s.id = 'supo-widget-script';
     s.src = '${widgetUrl}';
     s.async = true;
     document.body.appendChild(s);
-    return () => document.body.removeChild(s);
+
+    return () => {
+      // Keep the script mounted if your app uses client-side routing.
+    };
   }, []);
+
   return null;
 }`,
 
-    nextjs: `// Add to your root layout.tsx
-import Script from 'next/script';
-
-// Inside your layout's <body>:
-<>
-  <Script id="supo-init" strategy="beforeInteractive">
-    {\`window.SupoSettings = { productId: '${productId}' };\`}
-  </Script>
-  <Script src="${widgetUrl}" strategy="lazyOnload" />
-</>`,
-
-    vue: `// In App.vue or your root component
-import { onMounted } from 'vue';
-
-onMounted(() => {
-  window.SupoSettings = { productId: '${productId}' };
-  const s = document.createElement('script');
-  s.src = '${widgetUrl}';
-  s.async = true;
-  document.body.appendChild(s);
-});`,
-
-    angular: `// In AppComponent (app.component.ts)
-import { Component, OnInit } from '@angular/core';
-
-@Component({ selector: 'app-root', templateUrl: './app.component.html' })
-export class AppComponent implements OnInit {
-  ngOnInit() {
-    (window as any).SupoSettings = { productId: '${productId}' };
-    const s = document.createElement('script');
-    s.src = '${widgetUrl}';
-    s.async = true;
-    document.body.appendChild(s);
-  }
-}`,
+    cms: `<!-- Add this in your site footer/custom code area. Load it once per page. -->
+<script>
+  window.SupoSettings = {
+    productId: "${productId}"
+  };
+</script>
+<script src="${widgetUrl}" async></script>`,
   };
 
   const copyEmbed = async () => {
@@ -345,6 +347,10 @@ export class AppComponent implements OnInit {
           Add the widget to your site — works with any framework or plain HTML.
         </p>
 
+        <p className="mb-4 text-xs text-[color:var(--text-tertiary)]">
+          The hosted widget is currently in beta testing and may be unstable.
+        </p>
+
         {/* Tab selector */}
         <div className="mb-3 flex overflow-hidden rounded-lg border border-border">
           {TABS.map((tab) => (
@@ -364,10 +370,9 @@ export class AppComponent implements OnInit {
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
             <p className="text-xs text-[color:var(--text-secondary)]">
               {activeTab === "html" && "Paste before the </body> tag on every page"}
-              {activeTab === "react" && "Add <SupoWidget /> to your root component or _app.tsx"}
-              {activeTab === "nextjs" && "Add to your root layout.tsx using next/script"}
-              {activeTab === "vue" && "Call from onMounted in your root App.vue"}
-              {activeTab === "angular" && "Call from ngOnInit in AppComponent"}
+              {activeTab === "nextjs" && "Add to app/layout.tsx using next/script"}
+              {activeTab === "react" && "Mount once near your app root"}
+              {activeTab === "cms" && "Add to your footer/custom code area"}
             </p>
             <button
               type="button"
