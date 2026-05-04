@@ -40,15 +40,13 @@ export function ProductRoleForm({ productId }: { productId: string }) {
             const result = await assignProductRole(productId, formData);
             form.reset();
             setRole("agent");
-            toast.success(
-              result.emailSent
-                ? result.kind === "assigned"
-                  ? "Product role updated and email sent"
-                  : "Invite saved and email sent"
-                : result.kind === "assigned"
-                  ? "Product role updated; email delivery was skipped"
-                  : "Invite saved; email delivery was skipped",
-            );
+            const actionText =
+              result.kind === "assigned" ? "Product role updated" : "Invite saved";
+            if (result.email.ok) {
+              toast.success(`${actionText}. Resend accepted email ${result.email.id}`);
+            } else {
+              toast.error(`${actionText}, but email failed: ${result.email.error}`);
+            }
           } catch (error) {
             toast.error(error instanceof Error ? error.message : "Failed to update role");
           }
@@ -192,11 +190,11 @@ export function PendingInviteActions({
           startTransition(async () => {
             try {
               const result = await resendProductInvitation(productId, invitationId);
-              toast.success(
-                result.emailSent
-                  ? "Invitation resent"
-                  : "Invitation refreshed; email delivery was skipped",
-              );
+              if (result.email.ok) {
+                toast.success(`Invitation resent. Resend accepted email ${result.email.id}`);
+              } else {
+                toast.error(`Invitation refreshed, but email failed: ${result.email.error}`);
+              }
             } catch (error) {
               toast.error(error instanceof Error ? error.message : "Failed to resend invite");
             }

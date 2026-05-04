@@ -83,7 +83,7 @@ export async function assignProductRole(
     await upsertPendingInvitation(productId, email, role, access.session.user.id, now);
   }
 
-  const email = await sendProductInviteEmail({
+  const emailResult = await sendProductInviteEmail({
     to: email,
     inviterName: access.session.user.name,
     productName: access.product.name,
@@ -91,7 +91,7 @@ export async function assignProductRole(
   });
 
   revalidatePath(`/products/${productId}/team`);
-  return { kind, email };
+  return { kind, email: emailResult };
 }
 
 async function upsertPendingInvitation(
