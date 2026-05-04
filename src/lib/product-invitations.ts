@@ -15,14 +15,26 @@ export async function acceptPendingProductInvitationsForUser({
   if (!normalizedEmail) return;
 
   const now = new Date();
-  const pendingInvites = await db.query.productInvitation.findMany({
-    where: and(
-      eq(productInvitation.email, normalizedEmail),
-      eq(productInvitation.status, "pending"),
-      gt(productInvitation.expiresAt, now),
-    ),
-    with: { product: { columns: { id: true, organizationId: true } } },
-  });
+  let pendingInvites: Array<
+    typeof productInvitation.$inferSelect & {
+      product: { id: string; organizationId: string };
+    }
+  >;
+
+  try {
+    pendingInvites = await db.query.productInvitation.findMany({
+      where: and(
+        eq(productInvitation.email, normalizedEmail),
+        eq(productInvitation.status, "pending"),
+        gt(productInvitation.expiresAt, now),
+      ),
+      with: { product: { columns: { id: true, organizationId: true } } },
+    });
+  } catch {
+    // Invitation acceptance is a convenience path and must never block login.
+    // This can happen locally before the product-role migration has been applied.
+    return;
+  }
 
   for (const invite of pendingInvites) {
     if (!isProductRole(invite.role)) continue;
