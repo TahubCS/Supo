@@ -25,12 +25,13 @@ export function ProductRoleForm({ productId }: { productId: string }) {
       className="grid gap-3 rounded-lg border border-border bg-card p-5 md:grid-cols-[1fr_180px_auto]"
       onSubmit={(event) => {
         event.preventDefault();
-        const formData = new FormData(event.currentTarget);
+        const form = event.currentTarget;
+        const formData = new FormData(form);
         formData.set("role", role);
         startTransition(async () => {
           try {
             const result = await assignProductRole(productId, formData);
-            event.currentTarget.reset();
+            form.reset();
             setRole("agent");
             toast.success(
               result.emailSent
