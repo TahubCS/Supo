@@ -1,10 +1,8 @@
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { member, product } from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { product } from "@/db/schema";
 import {
   conversationChannelName,
   createTokenRequest,
@@ -12,6 +10,7 @@ import {
   inboxChannelName,
   presenceChannelName,
 } from "@/lib/ably";
+import { requireProductAccess } from "@/lib/product-access";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
 
 // CORS — widget token requests are cross-origin (widget.js from any domain).
@@ -86,16 +85,11 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Agent inbox token ─────────────────────────────────────────────────────
-  // Requires a valid session with membership in the product's organization.
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const membership = await db.query.member.findFirst({
-    where: eq(member.userId, session.user.id),
-  });
-  if (!membership || membership.organizationId !== orgId) {
+  // Requires product-level inbox access. Sidebar visibility is not a security boundary.
+  let access: Awaited<ReturnType<typeof requireProductAccess>>;
+  try {
+    access = await requireProductAccess(productId, ["inbox"]);
+  } catch {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -106,7 +100,7 @@ export async function GET(req: NextRequest) {
     [`org:${orgId}:conversation:*`]: ["subscribe"],
   };
 
-  const tokenRequest = await createTokenRequest(capability, `agent:${session.user.id}`);
+  const tokenRequest = await createTokenRequest(capability, `agent:${access.session.user.id}`);
 
   if (!tokenRequest) {
     return NextResponse.json({ error: "Realtime not configured" }, { status: 503 });
