@@ -5,16 +5,9 @@ import { db } from "@/db";
 import { widgetConfig } from "@/db/schema";
 import { env } from "@/lib/env";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
+import { normalizeWidgetConfig } from "@/lib/widget-config";
 
 import { WidgetConfigurator } from "./WidgetConfigurator";
-
-const DEFAULT_CONFIG = {
-  botName: "Support",
-  greeting: "Hi there! How can I help you today?",
-  position: "bottom-right",
-  theme: "dark",
-  accentColor: "#18181b",
-};
 
 export default async function WidgetPage({
   params,
@@ -29,15 +22,7 @@ export default async function WidgetPage({
     where: eq(widgetConfig.productId, id),
   });
 
-  const initialConfig = existing
-    ? {
-        botName: existing.botName,
-        greeting: existing.greeting,
-        position: existing.position,
-        theme: existing.theme,
-        accentColor: existing.accentColor,
-      }
-    : DEFAULT_CONFIG;
+  const initialConfig = normalizeWidgetConfig(existing);
 
   return (
     <div className="px-8 py-8">

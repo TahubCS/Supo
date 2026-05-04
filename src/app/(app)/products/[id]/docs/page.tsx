@@ -280,6 +280,23 @@ export function HelpButton() {
               through realtime or polling fallback.
             </p>
           </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">Widget customization</p>
+            <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+              Product admins and developers can configure branding, launcher style, panel
+              size, copy, and Supo attribution from the Widget page. These settings are
+              loaded by the hosted script; developers do not need to add extra script
+              options for them.
+            </p>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground">Beta notice</p>
+            <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+              The customer-facing beta testing notice is always visible during alpha. The
+              footer attribution can be hidden from the Widget page, but the beta notice is
+              not configurable yet.
+            </p>
+          </div>
         </div>
       </section>
 
