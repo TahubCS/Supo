@@ -99,6 +99,13 @@
       "when": 1777767360000,
       "tag": "0013_product_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777853760000,
+      "tag": "0014_product_role_schema_hardening",
+      "breakpoints": true
     }
   ]
 }
