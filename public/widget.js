@@ -80,6 +80,15 @@
     accentColor: '#18181b',
     position: 'bottom-right',
     theme: 'dark',
+    launcherLabel: 'Support',
+    launcherStyle: 'icon',
+    panelSize: 'standard',
+    borderRadius: 'rounded',
+    introTitle: 'Start a conversation',
+    introDescription: 'Enter your details so we can help you.',
+    inputPlaceholder: 'Ask a question...',
+    agentHandoffLabel: 'Speak to an Agent',
+    showPoweredBy: true,
   };
   var messages = [];
   // 'idle'          — normal, textarea enabled
@@ -331,6 +340,11 @@
     var muted   = isDark ? '#a1a1aa' : '#71717a';
     var inputBg = isDark ? '#27272a' : '#f4f4f5';
     var pos     = isRight ? 'right' : 'left';
+    var panelWidth = cfg.panelSize === 'compact' ? '300px' : cfg.panelSize === 'wide' ? '380px' : '340px';
+    var radius = cfg.borderRadius === 'soft' ? '8px' : cfg.borderRadius === 'square' ? '2px' : '16px';
+    var innerRadius = cfg.borderRadius === 'soft' ? '8px' : cfg.borderRadius === 'square' ? '4px' : '12px';
+    var buttonRadius = cfg.borderRadius === 'square' ? '8px' : '999px';
+    var launcherHasLabel = cfg.launcherStyle === 'icon-label';
 
     return [
       '* { box-sizing: border-box; margin: 0; padding: 0; }',
@@ -338,17 +352,20 @@
       '  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }',
 
       '#supo-bubble {',
-      '  width: 52px; height: 52px; border-radius: 50%; background: ' + a + ';',
+      '  min-width: 52px; width: ' + (launcherHasLabel ? 'auto' : '52px') + '; height: 52px;',
+      '  padding: ' + (launcherHasLabel ? '0 16px' : '0') + '; border-radius: ' + buttonRadius + '; background: ' + a + ';',
       '  border: none; cursor: pointer; display: flex; align-items: center;',
-      '  justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.25);',
+      '  justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.25);',
       '  transition: transform .2s, box-shadow .2s; }',
       '#supo-bubble:hover { transform: scale(1.07); box-shadow: 0 6px 20px rgba(0,0,0,0.3); }',
+      '#supo-bubble.supo-open { width: 52px; padding: 0; }',
       '#supo-bubble svg { pointer-events: none; }',
+      '#supo-bubble-label { color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap; }',
 
       '#supo-panel {',
       '  position: absolute; bottom: 64px; ' + pos + ': 0;',
-      '  width: 340px; max-height: 540px; background: ' + bg + ';',
-      '  border: 1px solid ' + border + '; border-radius: 16px;',
+      '  width: ' + panelWidth + '; max-width: calc(100vw - 40px); max-height: 540px; background: ' + bg + ';',
+      '  border: 1px solid ' + border + '; border-radius: ' + radius + ';',
       '  display: flex; flex-direction: column; overflow: hidden;',
       '  box-shadow: 0 8px 32px rgba(0,0,0,0.2);',
       '  transition: opacity .2s, transform .2s; }',
@@ -389,7 +406,7 @@
       '.supo-msg.supo-system  { align-self: center; align-items: center; width: 100%; max-width: 100%; }',
 
       '.supo-bub {',
-      '  padding: 8px 11px; border-radius: 12px; font-size: 13px;',
+      '  padding: 8px 11px; border-radius: ' + innerRadius + '; font-size: 13px;',
       '  line-height: 1.5; word-break: break-word; white-space: pre-wrap; }',
       '.supo-user  .supo-bub { background: ' + a + '; color: #fff; border-bottom-right-radius: 4px; }',
       '.supo-ai    .supo-bub { background: ' + msgBg + '; color: ' + text + '; border-bottom-left-radius: 4px; }',
@@ -421,12 +438,12 @@
       '#supo-id-form p  { font-size: 12px; color: ' + muted + '; }',
       '.supo-inp {',
       '  width: 100%; padding: 8px 11px; border: 1px solid ' + border + ';',
-      '  border-radius: 8px; background: ' + inputBg + '; color: ' + text + ';',
+      '  border-radius: ' + innerRadius + '; background: ' + inputBg + '; color: ' + text + ';',
       '  font-size: 13px; outline: none; font-family: inherit; }',
       '.supo-inp:focus { border-color: ' + a + '; }',
       '.supo-inp.supo-error { border-color: #ef4444; }',
       '#supo-id-btn {',
-      '  padding: 9px; border-radius: 8px; border: none; cursor: pointer;',
+      '  padding: 9px; border-radius: ' + innerRadius + '; border: none; cursor: pointer;',
       '  background: ' + a + '; color: #fff; font-size: 13px; font-weight: 500;',
       '  font-family: inherit; }',
       '#supo-id-btn:hover { opacity: .9; }',
@@ -436,7 +453,7 @@
       '  display: flex; gap: 7px; align-items: flex-end; flex-shrink: 0; }',
       '#supo-input {',
       '  flex: 1; padding: 7px 10px; border: 1px solid ' + border + ';',
-      '  border-radius: 10px; background: ' + inputBg + '; color: ' + text + ';',
+      '  border-radius: ' + innerRadius + '; background: ' + inputBg + '; color: ' + text + ';',
       '  font-size: 13px; resize: none; outline: none; max-height: 96px;',
       '  line-height: 1.45; font-family: inherit; }',
       '#supo-input:focus { border-color: ' + a + '; }',
@@ -444,14 +461,14 @@
       '#supo-input:disabled { opacity: .5; cursor: not-allowed; }',
       '#supo-send {',
       '  padding: 7px 12px; background: ' + a + '; color: #fff; border: none;',
-      '  border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 500;',
+      '  border-radius: ' + innerRadius + '; cursor: pointer; font-size: 12px; font-weight: 500;',
       '  height: 34px; flex-shrink: 0; font-family: inherit; }',
       '#supo-send:hover:not(:disabled) { opacity: .9; }',
       '#supo-send:disabled { opacity: .45; cursor: default; }',
 
       // "Speak to an agent" quick-reply button — only shown when AI responds with escalation offer
       '#supo-escalate-btn {',
-      '  margin: 0 12px 8px; padding: 8px 14px; border-radius: 8px; cursor: pointer;',
+      '  margin: 0 12px 8px; padding: 8px 14px; border-radius: ' + innerRadius + '; cursor: pointer;',
       '  font-size: 12px; font-weight: 500; font-family: inherit;',
       '  background: transparent; border: 1px solid ' + agentBorder + '; color: ' + agentText + ';',
       '  text-align: center; transition: background .15s; }',
@@ -484,9 +501,13 @@
   }
 
   function renderBubble() {
+    var label = !isOpen && cfg.launcherStyle === 'icon-label'
+      ? '<span id="supo-bubble-label">' + esc(cfg.launcherLabel) + '</span>'
+      : '';
     return (
-      '<button id="supo-bubble" aria-label="Open support chat">' +
+      '<button id="supo-bubble" class="' + (isOpen ? 'supo-open' : '') + '" aria-label="Open support chat">' +
       (isOpen ? ICON_CLOSE : ICON_CHAT) +
+      label +
       '</button>'
     );
   }
@@ -497,13 +518,18 @@
       renderHeader() +
       renderBetaNotice() +
       (customer ? renderChat() : renderIdForm()) +
-      '<div id="supo-powered"><a href="https://supo.app" target="_blank" rel="noopener">Powered by Supo</a></div>' +
+      renderPoweredBy() +
       '</div>'
     );
   }
 
   function renderBetaNotice() {
     return '<div id="supo-beta"><strong>BETA testing:</strong> this widget is unstable at the moment.</div>';
+  }
+
+  function renderPoweredBy() {
+    if (cfg.showPoweredBy === false) return '';
+    return '<div id="supo-powered"><a href="https://supo.app" target="_blank" rel="noopener">Powered by Supo</a></div>';
   }
 
   function renderHeader() {
@@ -578,7 +604,7 @@
     // Quick-reply "Speak to an Agent" button — shown only when idle and AI offered escalation
     var showEscBtn = widgetState === 'idle' && lastAiOfferedEscalation();
     if (showEscBtn) {
-      html += '<button id="supo-escalate-btn">Speak to an Agent</button>';
+      html += '<button id="supo-escalate-btn">' + esc(cfg.agentHandoffLabel) + '</button>';
     }
 
     // Composer — disabled while streaming or waiting for an agent
@@ -587,11 +613,11 @@
       ? 'Waiting for an agent…'
       : isAgentActive
         ? 'Reply to agent…'
-        : 'Ask a question…';
+        : cfg.inputPlaceholder;
 
     html +=
       '<div id="supo-composer">' +
-      '<textarea id="supo-input" placeholder="' + placeholder + '" rows="1"' +
+      '<textarea id="supo-input" placeholder="' + esc(placeholder) + '" rows="1"' +
       (composerDisabled ? ' disabled' : '') + '></textarea>' +
       '<button id="supo-send"' + (composerDisabled ? ' disabled' : '') + '>Send</button>' +
       '</div>';
@@ -602,8 +628,8 @@
   function renderIdForm() {
     return (
       '<div id="supo-id-form">' +
-      '<h3>Start a conversation</h3>' +
-      '<p>Enter your details so we can help you.</p>' +
+      '<h3>' + esc(cfg.introTitle) + '</h3>' +
+      '<p>' + esc(cfg.introDescription) + '</p>' +
       '<input id="supo-name"  class="supo-inp" type="text"  placeholder="Your name"  autocomplete="name" />' +
       '<input id="supo-email" class="supo-inp" type="email" placeholder="Your email" autocomplete="email" />' +
       '<button id="supo-id-btn">Start chat</button>' +
