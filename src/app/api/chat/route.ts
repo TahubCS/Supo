@@ -23,6 +23,7 @@ import {
   createConversationPublicAccessToken,
   findWidgetConversation,
 } from "@/lib/widget-conversation-access";
+import { normalizeWidgetConfig } from "@/lib/widget-config";
 
 export const maxDuration = 60;
 
@@ -59,17 +60,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
 
-  const config = found.widgetConfigs[0];
-  return NextResponse.json(
-    {
-      botName: config?.botName ?? "Support",
-      greeting: config?.greeting ?? "Hi there! How can I help you today?",
-      position: config?.position ?? "bottom-right",
-      theme: config?.theme ?? "dark",
-      accentColor: config?.accentColor ?? "#18181b",
-    },
-    { headers: CORS },
-  );
+  return NextResponse.json(normalizeWidgetConfig(found.widgetConfigs[0]), { headers: CORS });
 }
 
 type ChatRequest = {
@@ -206,8 +197,8 @@ export async function POST(req: NextRequest) {
     throw error;
   }
 
-  const config = foundProduct.widgetConfigs[0] ?? null;
-  const botName = config?.botName ?? "Support";
+  const config = normalizeWidgetConfig(foundProduct.widgetConfigs[0]);
+  const botName = config.botName;
 
   // ── Customer upsert ──────────────────────────────────────────────────────
   let cust = await db.query.customer.findFirst({
