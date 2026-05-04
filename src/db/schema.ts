@@ -329,6 +329,17 @@ export const widgetConfig = pgTable("widget_config", {
   position: text("position").notNull().default("bottom-right"),
   theme: text("theme").notNull().default("dark"),
   accentColor: text("accent_color").notNull().default("#18181b"),
+  launcherLabel: text("launcher_label").notNull().default("Support"),
+  launcherStyle: text("launcher_style").notNull().default("icon"),
+  panelSize: text("panel_size").notNull().default("standard"),
+  borderRadius: text("border_radius").notNull().default("rounded"),
+  introTitle: text("intro_title").notNull().default("Start a conversation"),
+  introDescription: text("intro_description")
+    .notNull()
+    .default("Enter your details so we can help you."),
+  inputPlaceholder: text("input_placeholder").notNull().default("Ask a question..."),
+  agentHandoffLabel: text("agent_handoff_label").notNull().default("Speak to an Agent"),
+  showPoweredBy: boolean("show_powered_by").notNull().default(true),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
