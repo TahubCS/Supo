@@ -3,8 +3,8 @@ import { Resend } from "resend";
 import { env } from "@/lib/env";
 import type { ProductRole } from "@/lib/product-access";
 
-const resend = new Resend(env.RESEND_API_KEY);
 const INVITE_FROM = env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>";
+const RESEND_KEY_PATTERN = /^re_[A-Za-z0-9_-]+$/;
 
 export type ProductInviteEmailResult =
   | { ok: true; id: string }
@@ -22,6 +22,17 @@ export async function sendProductInviteEmail({
   role: ProductRole;
 }): Promise<ProductInviteEmailResult> {
   const appUrl = env.BETTER_AUTH_URL;
+  const apiKey = env.RESEND_API_KEY.trim();
+
+  if (!RESEND_KEY_PATTERN.test(apiKey)) {
+    return {
+      ok: false,
+      error:
+        "RESEND_API_KEY is malformed. Check .env.local for extra spaces, quotes, or trailing punctuation.",
+    };
+  }
+
+  const resend = new Resend(apiKey);
 
   try {
     const response = await resend.emails.send({
