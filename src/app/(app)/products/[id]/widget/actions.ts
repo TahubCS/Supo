@@ -5,8 +5,6 @@ import { widgetConfig } from "@/db/schema";
 import { requireProductAccess } from "@/lib/product-access";
 import { normalizeWidgetConfig, type WidgetConfigValues } from "@/lib/widget-config";
 
-export type { WidgetConfigValues };
-
 export async function saveWidgetConfig(
   productId: string,
   values: WidgetConfigValues,
