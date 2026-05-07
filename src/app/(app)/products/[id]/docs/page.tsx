@@ -58,7 +58,11 @@ export default async function DeveloperDocsPage({
   const htmlSnippet = `<!-- Place once before </body> on every page where support should be available. -->
 <script>
   window.SupoSettings = {
-    productId: "${id}"
+    productId: "${id}",
+    appearance: {
+      launcherStyle: "icon-label",
+      launcherLabel: "Support"
+    }
   };
 </script>
 <script async src="${widgetUrl}"></script>`;
@@ -90,7 +94,14 @@ export function SupoWidgetLoader() {
     if (document.getElementById("supo-widget-script")) return;
 
     (window as Window & { SupoSettings?: { productId: string } }).SupoSettings = {
-      productId: "${id}"
+      productId: "${id}",
+      customer: getCurrentUserForSupport(),
+      appearance: {
+        theme: "dark",
+        accentColor: "#18181b",
+        launcherStyle: "icon-label",
+        launcherLabel: "Support"
+      }
     };
 
     const script = document.createElement("script");
@@ -106,6 +117,20 @@ export function SupoWidgetLoader() {
 
   return null;
 }`;
+
+  const runtimeApiSnippet = `window.Supo?.open();
+window.Supo?.close();
+window.Supo?.toggle();
+window.Supo?.identify({ name: "Jane Smith", email: "jane@example.com" });
+window.Supo?.reset();
+
+window.addEventListener("supo:ready", () => {
+  console.log("Supo is ready");
+});
+
+window.addEventListener("supo:escalation-change", (event) => {
+  console.log("Handoff status", event.detail.status);
+});`;
 
   const cmsSnippet = `<!-- Add this in your site footer/custom code area. Load it once per page. -->
 <script>
@@ -177,8 +202,8 @@ export function HelpButton() {
         />
         <InfoCard
           icon={Settings2}
-          title="Settings object"
-          body="window.SupoSettings must exist before widget.js loads. apiUrl is optional for local or self-hosted API origin testing."
+          title="Runtime settings"
+          body="window.SupoSettings can pass product id, local API origin, customer identity, appearance overrides, behavior flags, and lifecycle hooks."
         />
         <InfoCard
           icon={Radio}
@@ -252,16 +277,19 @@ export function HelpButton() {
           <div>
             <p className="text-sm font-medium text-foreground">Supported settings today</p>
             <ul className="mt-2 space-y-2 text-sm text-[color:var(--text-secondary)]">
-              <li>`productId`: required. The public product identifier Supo uses to load config and create conversations.</li>
-              <li>`apiUrl`: optional. Use only when widget.js is served from a different origin than the Supo API.</li>
+              <li><code>productId</code>: required. The public product identifier Supo uses to load config and create conversations.</li>
+              <li><code>apiUrl</code>: optional. Use only when widget.js is served from a different origin than the Supo API.</li>
+              <li><code>customer</code>: optional object or function returning <code>{`{ name, email }`}</code>; skips the built-in identity form when valid.</li>
+              <li><code>appearance</code>: optional runtime overrides for theme, position, accent color, launcher, panel size, radius, labels, copy, and attribution.</li>
+              <li><code>behavior</code>: optional <code>startOpen</code> and <code>hideLauncher</code> flags for host-owned launcher flows.</li>
+              <li><code>hooks</code>: optional callbacks for ready, open, close, error, and escalation status changes.</li>
             </ul>
           </div>
           <div>
-            <p className="text-sm font-medium text-foreground">Customer identity today</p>
+            <p className="text-sm font-medium text-foreground">Customer identity</p>
             <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
-              The hosted widget asks the visitor for name and email inside the chat panel.
-              Passing `customer` through `window.SupoSettings` is planned, but not supported
-              by the current hosted script.
+              The hosted widget can ask the visitor for name and email, or the host app can
+              pass <code>customer</code> from its own signed-in user context through <code>window.SupoSettings</code>.
             </p>
           </div>
           <div>
@@ -285,8 +313,8 @@ export function HelpButton() {
             <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
               Product admins and developers can configure branding, launcher style, panel
               size, copy, and Supo attribution from the Widget page. These settings are
-              loaded by the hosted script; developers do not need to add extra script
-              options for them.
+              loaded by the hosted script as defaults. Developers can override them per
+              app, page, or user with <code>window.SupoSettings.appearance</code>.
             </p>
           </div>
           <div>
@@ -298,6 +326,16 @@ export function HelpButton() {
             </p>
           </div>
         </div>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <p className="mb-1 text-sm font-medium text-foreground">Runtime API and events</p>
+          <p className="text-sm text-[color:var(--text-secondary)]">
+            Use this when the customer app owns the help button, user identity, or analytics.
+          </p>
+        </div>
+        <CodeBlock code={runtimeApiSnippet} />
       </section>
 
       <section className="space-y-4">

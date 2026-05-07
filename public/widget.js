@@ -97,6 +97,109 @@
   // 'agent_active'  — agent connected, textarea enabled, polling active
   var widgetState = 'idle';
   var isOpen      = false;
+  var lastEscalationStatus = null;
+
+  function isObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  function isAllowed(value, allowed) {
+    return allowed.indexOf(value) !== -1;
+  }
+
+  function validColor(value) {
+    return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value.trim());
+  }
+
+  function validText(value, max) {
+    return typeof value === 'string' && value.trim() ? value.trim().slice(0, max) : null;
+  }
+
+  function normalizeCustomer(value) {
+    if (!isObject(value)) return null;
+    var name = validText(value.name, 120);
+    var email = validText(value.email, 254);
+    if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+    return { name: name, email: email.toLowerCase() };
+  }
+
+  function resolveSettingsCustomer() {
+    if (typeof settings.customer === 'function') {
+      try { return normalizeCustomer(settings.customer()); }
+      catch (error) { notifyError(error); return null; }
+    }
+    return normalizeCustomer(settings.customer);
+  }
+
+  function applyAppearanceOverrides(source) {
+    if (!isObject(source)) return;
+
+    var textLimits = {
+      botName: 32,
+      greeting: 160,
+      launcherLabel: 32,
+      introTitle: 64,
+      introDescription: 140,
+      inputPlaceholder: 64,
+      agentHandoffLabel: 48,
+    };
+
+    Object.keys(textLimits).forEach(function (key) {
+      var value = validText(source[key], textLimits[key]);
+      if (value) cfg[key] = value;
+    });
+
+    if (validColor(source.accentColor)) cfg.accentColor = source.accentColor.trim();
+    if (isAllowed(source.theme, ['dark', 'light'])) cfg.theme = source.theme;
+    if (isAllowed(source.position, ['bottom-right', 'bottom-left'])) cfg.position = source.position;
+    if (isAllowed(source.launcherStyle, ['icon', 'icon-label'])) cfg.launcherStyle = source.launcherStyle;
+    if (isAllowed(source.panelSize, ['compact', 'standard', 'wide'])) cfg.panelSize = source.panelSize;
+    if (isAllowed(source.borderRadius, ['soft', 'rounded', 'square'])) cfg.borderRadius = source.borderRadius;
+    if (typeof source.showPoweredBy === 'boolean') cfg.showPoweredBy = source.showPoweredBy;
+  }
+
+  function emit(name, detail) {
+    try {
+      window.dispatchEvent(new CustomEvent('supo:' + name, { detail: detail || {} }));
+    } catch {}
+  }
+
+  function callHook(name, arg) {
+    var hooks = settings.hooks || {};
+    if (typeof hooks[name] !== 'function') return;
+    try { hooks[name](arg); }
+    catch (error) { console.error('[Supo] hook error:', error); }
+  }
+
+  function notifyError(error) {
+    var message = error && error.message ? error.message : String(error || 'Unknown error');
+    var payload = { message: message };
+    emit('error', payload);
+    callHook('onError', payload);
+  }
+
+  function notifyEscalation(status) {
+    if (lastEscalationStatus === status) return;
+    lastEscalationStatus = status;
+    emit('escalation-change', { status: status });
+    callHook('onEscalationChange', status);
+  }
+
+  function applyEscalationStatus(status) {
+    if (status === 'pending') {
+      widgetState = 'waiting_agent';
+      startPolling();
+      notifyEscalation('pending');
+    } else if (status === 'active') {
+      widgetState = 'agent_active';
+      startPolling();
+      notifyEscalation('active');
+    } else if (status === null && widgetState !== 'idle' && widgetState !== 'streaming') {
+      widgetState = 'idle';
+      stopPolling();
+      notifyEscalation(null);
+    }
+  }
 
   // ── Polling ──────────────────────────────────────────────────────────────
   var pollTimer   = null;
@@ -128,21 +231,10 @@
       .then(function (data) {
         if (!data) return;
 
-        // Advance state machine based on escalation status from server
-        if (data.escalationStatus === 'pending' && widgetState !== 'waiting_agent') {
-          widgetState = 'waiting_agent';
-          startPolling();
-          render();
-        } else if (data.escalationStatus === 'active' && widgetState !== 'agent_active') {
-          widgetState = 'agent_active';
-          startPolling();
-          render();
-        } else if (data.escalationStatus === null && widgetState !== 'idle' && widgetState !== 'streaming') {
-          // Conversation was resolved/reset — return to idle
-          widgetState = 'idle';
-          stopPolling();
-          render();
-        }
+        // Advance state machine based on escalation status from server.
+        var beforeState = widgetState;
+        applyEscalationStatus(data.escalationStatus);
+        if (beforeState !== widgetState) render();
 
         // Append any new agent messages
         if (data.messages && data.messages.length > 0) {
@@ -236,7 +328,10 @@
                   if (prev.some(function (m) { return m.text === d.body && m.role === 'agent'; })) return prev;
                   return prev.concat([{ role: 'agent', text: d.body }]);
                 });
-                if (widgetState === 'waiting_agent') { widgetState = 'agent_active'; }
+                if (widgetState === 'waiting_agent') {
+                  widgetState = 'agent_active';
+                  notifyEscalation('active');
+                }
                 render();
               }
             });
@@ -246,9 +341,8 @@
 
             var escalationSub = ch.subscribe('escalation_update', function (msg) {
               var s = msg.data.status;
-              if (s === 'pending')  { widgetState = 'waiting_agent'; startPolling(); render(); }
-              if (s === 'active')   { widgetState = 'agent_active';  startPolling(); render(); }
-              if (s === null)       { widgetState = 'idle'; stopPolling(); render(); }
+              applyEscalationStatus(s === 'pending' || s === 'active' ? s : null);
+              render();
             });
             if (escalationSub && typeof escalationSub.catch === 'function') {
               escalationSub.catch(function () { startPolling(); });
@@ -286,14 +380,14 @@
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
         if (data && (data.escalationStatus === 'pending' || data.escalationStatus === 'active')) {
-          widgetState = data.escalationStatus === 'active' ? 'agent_active' : 'waiting_agent';
+          applyEscalationStatus(data.escalationStatus);
           messages.push({ role: 'system', text: 'Connecting you to an agent…' });
           render();
           doPoll();
-          startPolling();
         }
       })
-      .catch(function () {
+      .catch(function (error) {
+        notifyError(error);
         messages.push({ role: 'system', text: 'Could not connect to an agent. Please try again.' });
         render();
       });
@@ -501,6 +595,7 @@
   }
 
   function renderBubble() {
+    if (settings.behavior && settings.behavior.hideLauncher === true) return '';
     var label = !isOpen && cfg.launcherStyle === 'icon-label'
       ? '<span id="supo-bubble-label">' + esc(cfg.launcherLabel) + '</span>'
       : '';
@@ -529,7 +624,7 @@
 
   function renderPoweredBy() {
     if (cfg.showPoweredBy === false) return '';
-    return '<div id="supo-powered"><a href="https://supo.app" target="_blank" rel="noopener">Powered by Supo</a></div>';
+    return '<div id="supo-powered"><a href="https://supo-mu.vercel.app" target="_blank" rel="noopener">Powered by Supo</a></div>';
   }
 
   function renderHeader() {
@@ -639,11 +734,12 @@
 
   // ── Events ───────────────────────────────────────────────────────────────
   function bindEvents() {
-    $('#supo-bubble').addEventListener('click', toggleOpen);
+    var bubble = $('#supo-bubble');
+    if (bubble) bubble.addEventListener('click', toggleOpen);
 
     var closeBtn = $('#supo-close');
     if (closeBtn) closeBtn.addEventListener('click', function () {
-      isOpen = false; render();
+      setOpen(false);
     });
 
     var idBtn = $('#supo-id-btn');
@@ -673,9 +769,16 @@
   }
 
   function toggleOpen() {
-    isOpen = !isOpen;
+    setOpen(!isOpen);
+  }
+
+  function setOpen(nextOpen) {
+    if (isOpen === nextOpen) return;
+    isOpen = nextOpen;
     render();
     if (isOpen) {
+      emit('open');
+      callHook('onOpen');
       // Resume polling when widget is re-opened during an escalation
       if (widgetState === 'waiting_agent' || widgetState === 'agent_active') {
         startPolling();
@@ -683,6 +786,8 @@
       var inputEl = $('#supo-input');
       if (inputEl) setTimeout(function () { inputEl.focus(); }, 50);
     } else {
+      emit('close');
+      callHook('onClose');
       // Stop polling while widget is closed to save requests
       stopPolling();
     }
@@ -741,7 +846,7 @@
           setConvId(nextConvId, nextConvToken, customer);
         }
       })
-      .catch(function () {});
+      .catch(notifyError);
       return;
     }
 
@@ -774,9 +879,8 @@
       var escStatus = res.headers.get('x-escalation-status');
       if (escStatus === 'pending' || escStatus === 'active') {
         messages[messages.length - 1] = { role: 'system', text: 'An agent will be with you shortly.' };
-        widgetState = escStatus === 'active' ? 'agent_active' : 'waiting_agent';
+        applyEscalationStatus(escStatus);
         doPoll();
-        startPolling();
         render();
         return;
       }
@@ -814,7 +918,8 @@
 
       return pump();
     })
-    .catch(function () {
+    .catch(function (error) {
+      notifyError(error);
       messages[messages.length - 1] = { role: 'ai', text: 'Something went wrong. Please try again.' };
       widgetState = 'idle';
       render();
@@ -855,12 +960,8 @@
           lastSeenAt = data.messages[data.messages.length - 1].createdAt;
         }
 
-        if (data.escalationStatus === 'pending') {
-          widgetState = 'waiting_agent';
-          startPolling();
-        } else if (data.escalationStatus === 'active') {
-          widgetState = 'agent_active';
-          startPolling();
+        if (data.escalationStatus === 'pending' || data.escalationStatus === 'active') {
+          applyEscalationStatus(data.escalationStatus);
         }
 
         // Subscribe to real-time updates now that we have a confirmed convId.
@@ -868,7 +969,69 @@
 
         render();
       })
-      .catch(function () { /* silent — initial render already shown */ });
+      .catch(function (error) { notifyError(error); });
+  }
+
+  function clearStoredConversationRefs() {
+    try {
+      localStorage.removeItem(CUST_KEY);
+      sessionStorage.removeItem(CONV_KEY);
+      for (var i = localStorage.length - 1; i >= 0; i--) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf(CONV_KEY + '_') === 0) localStorage.removeItem(key);
+      }
+    } catch {}
+  }
+
+  function identify(customer) {
+    var normalized = normalizeCustomer(customer);
+    if (!normalized) {
+      notifyError(new Error('Valid customer.name and customer.email are required.'));
+      return false;
+    }
+    setCustomer(normalized);
+    render();
+    restoreConversation();
+    return true;
+  }
+
+  window.Supo = {
+    open: function () { setOpen(true); },
+    close: function () { setOpen(false); },
+    toggle: function () { toggleOpen(); },
+    identify: identify,
+    reset: function () {
+      closeAblyClient();
+      stopPolling();
+      clearStoredConversationRefs();
+      messages = [];
+      widgetState = 'idle';
+      lastEscalationStatus = null;
+      lastSeenAt = null;
+      render();
+    },
+  };
+
+  function mount(data) {
+    cfg = Object.assign(cfg, data || {});
+    applyAppearanceOverrides(settings.appearance);
+
+    var providedCustomer = resolveSettingsCustomer();
+    if (providedCustomer) setCustomer(providedCustomer);
+
+    if (settings.behavior && settings.behavior.startOpen === true) {
+      isOpen = true;
+    }
+
+    render();
+
+    if (isOpen) {
+      emit('open');
+      callHook('onOpen');
+    }
+    emit('ready', { productId: productId });
+    callHook('onReady');
+    restoreConversation();
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────
@@ -876,12 +1039,11 @@
     fetch(API_CONFIG)
       .then(function (res) { return res.ok ? res.json() : {}; })
       .then(function (data) {
-        cfg = Object.assign(cfg, data);
-        render();
-        restoreConversation();
+        mount(data);
       })
-      .catch(function () {
-        render();
+      .catch(function (error) {
+        notifyError(error);
+        mount({});
       });
   }
 
