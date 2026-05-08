@@ -14,6 +14,37 @@ const trustedOrigins =
   process.env.NODE_ENV === "production"
     ? [env.BETTER_AUTH_URL]
     : [env.BETTER_AUTH_URL, "http://localhost:3000"];
+
+function shouldSuppressInfraOAuthStateLog(level: string, message: string, args: unknown[]) {
+  if (level !== "error" || message !== "Failed to parse state") return false;
+
+  const error = args[0];
+  if (!(error instanceof Error)) return false;
+
+  const code = "code" in error ? error.code : undefined;
+  const isConsumedStateError =
+    code === "state_mismatch" && error.message === "State mismatch: verification not found";
+  if (!isConsumedStateError) return false;
+
+  const loggerStack = new Error().stack ?? "";
+  return loggerStack.includes("@better-auth/infra");
+}
+
+function logBetterAuth(level: "debug" | "info" | "warn" | "error", message: string, ...args: unknown[]) {
+  if (shouldSuppressInfraOAuthStateLog(level, message, args)) return;
+
+  const formatted = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${message}`;
+  if (level === "error") {
+    console.error(formatted, ...args);
+    return;
+  }
+  if (level === "warn") {
+    console.warn(formatted, ...args);
+    return;
+  }
+  console.log(formatted, ...args);
+}
+
 const adminAc = createAccessControl(defaultStatements);
 const supoAdminRole = adminAc.newRole({
   user: ["create", "list", "set-role", "ban", "set-password", "get", "update"],
@@ -29,6 +60,10 @@ export const auth = betterAuth({
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,
   trustedOrigins,
+  logger: {
+    level: "warn",
+    log: logBetterAuth,
+  },
   database: drizzleAdapter(db, {
     provider: "pg",
   }),
