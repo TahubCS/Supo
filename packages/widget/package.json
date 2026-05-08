@@ -1,13 +1,36 @@
 {
-  "name": "@supo/widget",
+  "name": "@supoapp/widget",
   "version": "0.1.0-alpha.1",
+  "description": "Official Supo browser widget SDK for React, vanilla TypeScript, and headless chat UI integrations.",
   "type": "module",
   "sideEffects": false,
+  "license": "MIT",
+  "homepage": "https://supo.app",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TahubCS/Supo.git",
+    "directory": "packages/widget"
+  },
+  "bugs": {
+    "url": "https://github.com/TahubCS/Supo/issues"
+  },
+  "keywords": [
+    "supo",
+    "support",
+    "chat",
+    "widget",
+    "customer-support",
+    "ai-support",
+    "react",
+    "nextjs",
+    "headless"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "exports": {
     ".": {
