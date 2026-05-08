@@ -1,8 +1,7 @@
 "use client";
 
-import { Check, Copy, MessageCircle } from "lucide-react";
-import type { ReactNode } from "react";
-import { useMemo, useState, useTransition } from "react";
+import { Check, Copy, MessageCircle, Package, Play, Settings2, Terminal, Wrench } from "lucide-react";
+import { useMemo, useState, useTransition, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +21,24 @@ import {
 
 import { saveWidgetConfig } from "./actions";
 
+type MainTab = "install" | "configure" | "preview" | "reference" | "fallback";
+type FrameworkTab = "react" | "nextjs" | "vite" | "vanilla";
+
+const MAIN_TABS: { id: MainTab; label: string; icon: typeof Package }[] = [
+  { id: "install", label: "Install", icon: Package },
+  { id: "configure", label: "Configure", icon: Settings2 },
+  { id: "preview", label: "Preview", icon: Play },
+  { id: "reference", label: "Reference", icon: Terminal },
+  { id: "fallback", label: "Fallback embed", icon: Wrench },
+];
+
+const FRAMEWORK_TABS: { id: FrameworkTab; label: string }[] = [
+  { id: "react", label: "React" },
+  { id: "nextjs", label: "Next.js" },
+  { id: "vite", label: "Vite" },
+  { id: "vanilla", label: "Vanilla TS" },
+];
+
 const ACCENT_COLORS = [
   { value: "#18181b", label: "Neutral" },
   { value: "#3b82f6", label: "Blue" },
@@ -29,8 +46,6 @@ const ACCENT_COLORS = [
   { value: "#10b981", label: "Emerald" },
   { value: "#f97316", label: "Orange" },
 ];
-
-const PAGE_LINES = [72, 88, 55, 91, 68, 80, 60];
 
 const PANEL_WIDTHS: Record<WidgetConfigValues["panelSize"], number> = {
   compact: 300,
@@ -44,140 +59,11 @@ const PANEL_RADII: Record<WidgetConfigValues["borderRadius"], number> = {
   square: 2,
 };
 
-type MainTab = "defaults" | "developer";
-type IntegrationTab = "html" | "nextjs" | "react" | "cms";
-
 function formatOption(value: string) {
   return value
     .split("-")
     .map((part) => part[0].toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function WidgetPreview(config: WidgetConfigValues) {
-  const isRight = config.position === "bottom-right";
-  const isDark = config.theme === "dark";
-
-  const panelBg = isDark ? "#18181b" : "#ffffff";
-  const panelBorder = isDark ? "#27272a" : "#e4e4e7";
-  const bubbleBg = isDark ? "#27272a" : "#f4f4f5";
-  const bubbleText = isDark ? "#a1a1aa" : "#52525b";
-  const inputBorder = isDark ? "#27272a" : "#e4e4e7";
-  const inputText = isDark ? "#71717a" : "#a1a1aa";
-  const panelWidth = Math.round(PANEL_WIDTHS[config.panelSize] * 0.72);
-  const panelRadius = PANEL_RADII[config.borderRadius];
-  const launcherRadius = config.borderRadius === "square" ? 8 : 999;
-
-  return (
-    <div className="relative h-full min-h-[34rem] overflow-hidden rounded-lg border border-border bg-[color:var(--card-elevated)]">
-      <div className="space-y-2 p-6">
-        {PAGE_LINES.map((w, i) => (
-          <div
-            key={i}
-            className="h-2 rounded-full bg-border opacity-60"
-            style={{ width: `${w}%` }}
-          />
-        ))}
-      </div>
-
-      <div
-        className={`absolute bottom-4 flex flex-col items-${isRight ? "end" : "start"}`}
-        style={{ [isRight ? "right" : "left"]: "16px" }}
-      >
-        <div
-          className="mb-2 overflow-hidden shadow-xl"
-          style={{
-            width: panelWidth,
-            background: panelBg,
-            border: `1px solid ${panelBorder}`,
-            borderRadius: panelRadius,
-          }}
-        >
-          <div
-            className="flex items-center gap-2 px-3 py-2.5"
-            style={{ background: config.accentColor }}
-          >
-            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20">
-              <MessageCircle className="size-3 text-white" />
-            </div>
-            <span className="block min-w-0 flex-1 truncate text-xs font-medium text-white">
-              {config.botName}
-            </span>
-          </div>
-
-          <div
-            className="border-b px-3 py-2 text-[10px] leading-relaxed"
-            style={{
-              borderColor: panelBorder,
-              background: isDark ? "#241f13" : "#fffbeb",
-              color: isDark ? "#facc15" : "#92400e",
-            }}
-          >
-            <strong>BETA testing:</strong> this widget is unstable at the moment.
-          </div>
-
-          <div className="space-y-2 p-3">
-            <div
-              className="px-3 py-2 text-xs leading-relaxed"
-              style={{
-                background: bubbleBg,
-                color: bubbleText,
-                borderRadius: Math.max(panelRadius - 2, 2),
-              }}
-            >
-              {config.greeting}
-            </div>
-            <div>
-              <p
-                className="text-xs font-medium"
-                style={{ color: isDark ? "#e4e4e7" : "#18181b" }}
-              >
-                {config.introTitle}
-              </p>
-              <p className="mt-1 text-[10px] leading-relaxed" style={{ color: bubbleText }}>
-                {config.introDescription}
-              </p>
-            </div>
-          </div>
-
-          <div className="px-3 pb-3">
-            <div
-              className="px-3 py-1.5 text-xs"
-              style={{
-                border: `1px solid ${inputBorder}`,
-                color: inputText,
-                borderRadius: Math.max(panelRadius - 4, 2),
-              }}
-            >
-              {config.inputPlaceholder}
-            </div>
-          </div>
-
-          {config.showPoweredBy ? (
-            <div className="pb-2 text-center text-[10px]" style={{ color: inputText }}>
-              Powered by Supo
-            </div>
-          ) : null}
-        </div>
-
-        <div
-          className="flex h-10 items-center justify-center gap-2 px-3 shadow-lg"
-          style={{
-            minWidth: config.launcherStyle === "icon-label" ? 112 : 40,
-            borderRadius: launcherRadius,
-            background: config.accentColor,
-          }}
-        >
-          <MessageCircle className="size-5 text-white" />
-          {config.launcherStyle === "icon-label" ? (
-            <span className="truncate text-xs font-medium text-white">
-              {config.launcherLabel}
-            </span>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function Section({
@@ -207,15 +93,18 @@ function CodeBlock({
   copyId,
   copiedKey,
   onCopy,
+  title,
 }: {
   code: string;
   copyId: string;
   copiedKey: string | null;
   onCopy: (key: string, code: string) => void;
+  title?: string;
 }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-end border-b border-border px-4 py-2.5">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <p className="text-xs text-[color:var(--text-secondary)]">{title ?? "Copy snippet"}</p>
         <button
           type="button"
           onClick={() => onCopy(copyId, code)}
@@ -241,23 +130,224 @@ function CodeBlock({
   );
 }
 
+function WidgetPreview({
+  config,
+  identified,
+  hiddenLauncher,
+}: {
+  config: WidgetConfigValues;
+  identified: boolean;
+  hiddenLauncher: boolean;
+}) {
+  const isDark = config.theme === "dark";
+  const panelBg = isDark ? "#18181b" : "#ffffff";
+  const panelBorder = isDark ? "#27272a" : "#e4e4e7";
+  const bubbleBg = isDark ? "#27272a" : "#f4f4f5";
+  const bubbleText = isDark ? "#a1a1aa" : "#52525b";
+  const panelRadius = PANEL_RADII[config.borderRadius];
+
+  return (
+    <div className="relative min-h-[34rem] overflow-hidden rounded-lg border border-border bg-[color:var(--card-elevated)]">
+      <div className="space-y-2 p-6">
+        {[72, 88, 55, 91, 68, 80, 60].map((width, index) => (
+          <div
+            key={index}
+            className="h-2 rounded-full bg-border opacity-60"
+            style={{ width: `${width}%` }}
+          />
+        ))}
+      </div>
+      <div className="absolute bottom-4 right-4 flex flex-col items-end">
+        <div
+          className="mb-2 overflow-hidden shadow-xl"
+          style={{
+            width: Math.round(PANEL_WIDTHS[config.panelSize] * 0.82),
+            background: panelBg,
+            border: `1px solid ${panelBorder}`,
+            borderRadius: panelRadius,
+          }}
+        >
+          <div className="flex items-center gap-2 px-3 py-2.5" style={{ background: config.accentColor }}>
+            <div className="flex h-5 w-5 items-center justify-center rounded-full bg-white/20">
+              <MessageCircle className="size-3 text-white" />
+            </div>
+            <span className="truncate text-xs font-medium text-white">{config.botName}</span>
+          </div>
+          <div
+            className="border-b px-3 py-2 text-[10px] leading-relaxed"
+            style={{
+              borderColor: panelBorder,
+              background: isDark ? "#241f13" : "#fffbeb",
+              color: isDark ? "#facc15" : "#92400e",
+            }}
+          >
+            <strong>BETA testing:</strong> this widget is unstable at the moment.
+          </div>
+          <div className="space-y-2 p-3">
+            {identified ? (
+              <>
+                <div
+                  className="px-3 py-2 text-xs leading-relaxed"
+                  style={{
+                    background: bubbleBg,
+                    color: bubbleText,
+                    borderRadius: Math.max(panelRadius - 2, 2),
+                  }}
+                >
+                  {config.greeting}
+                </div>
+                <div className="ml-auto w-fit rounded-lg px-3 py-2 text-xs text-white" style={{ background: config.accentColor }}>
+                  I need help with billing.
+                </div>
+              </>
+            ) : (
+              <div>
+                <p className="text-xs font-medium" style={{ color: isDark ? "#e4e4e7" : "#18181b" }}>
+                  {config.introTitle}
+                </p>
+                <p className="mt-1 text-[10px] leading-relaxed" style={{ color: bubbleText }}>
+                  {config.introDescription}
+                </p>
+              </div>
+            )}
+          </div>
+          {config.showPoweredBy ? (
+            <div className="pb-2 text-center text-[10px]" style={{ color: isDark ? "#71717a" : "#a1a1aa" }}>
+              Powered by Supo
+            </div>
+          ) : null}
+        </div>
+        {hiddenLauncher ? (
+          <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground">
+            Host app owns the help button
+          </div>
+        ) : (
+          <div
+            className="flex h-10 items-center justify-center gap-2 px-3 shadow-lg"
+            style={{
+              minWidth: config.launcherStyle === "icon-label" ? 112 : 40,
+              borderRadius: config.borderRadius === "square" ? 8 : 999,
+              background: config.accentColor,
+            }}
+          >
+            <MessageCircle className="size-5 text-white" />
+            {config.launcherStyle === "icon-label" ? (
+              <span className="truncate text-xs font-medium text-white">{config.launcherLabel}</span>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface WidgetConfiguratorProps {
   productId: string;
   initialConfig: WidgetConfigValues;
   widgetUrl: string;
+  apiBaseUrl: string;
 }
 
 export function WidgetConfigurator({
   productId,
   initialConfig,
   widgetUrl,
+  apiBaseUrl,
 }: WidgetConfiguratorProps) {
   const [config, setConfig] = useState<WidgetConfigValues>(initialConfig);
-  const [saved, setSaved] = useState(false);
+  const [activeTab, setActiveTab] = useState<MainTab>("install");
+  const [frameworkTab, setFrameworkTab] = useState<FrameworkTab>("react");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [mainTab, setMainTab] = useState<MainTab>("defaults");
-  const [activeSnippet, setActiveSnippet] = useState<IntegrationTab>("nextjs");
+  const [saved, setSaved] = useState(false);
+  const [previewIdentified, setPreviewIdentified] = useState(true);
+  const [previewHiddenLauncher, setPreviewHiddenLauncher] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const appearanceSnippet = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          theme: config.theme,
+          accentColor: config.accentColor,
+          launcherStyle: config.launcherStyle,
+          launcherLabel: config.launcherLabel,
+          panelSize: config.panelSize,
+          borderRadius: config.borderRadius,
+        },
+        null,
+        2,
+      ),
+    [config],
+  );
+
+  const reactSnippet = `"use client";
+
+import { SupoProvider, SupoWidget } from "@supo/widget/react";
+
+export function SupportWidget({ user, children }) {
+  return (
+    <SupoProvider
+      productId="${productId}"
+      apiBaseUrl="${apiBaseUrl}"
+      customer={{ name: user.name, email: user.email }}
+      appearance={${appearanceSnippet.replaceAll("\n", "\n        ")}}
+    >
+      {children}
+      <SupoWidget />
+    </SupoProvider>
+  );
+}`;
+
+  const vanillaSnippet = `import { initSupo } from "@supo/widget";
+
+const supo = initSupo({
+  productId: "${productId}",
+  apiBaseUrl: "${apiBaseUrl}",
+  customer: () => window.currentUser ?? null,
+  appearance: ${appearanceSnippet},
+});
+
+document.querySelector("#help")?.addEventListener("click", () => {
+  supo.open();
+});`;
+
+  const headlessSnippet = `import { createSupoClient } from "@supo/widget/headless";
+
+const client = createSupoClient({
+  productId: "${productId}",
+  apiBaseUrl: "${apiBaseUrl}",
+  customer: { name: user.name, email: user.email },
+});
+
+const answer = await client.sendMessage("I need help with billing");
+
+client.on("message", (message) => {
+  console.log(message);
+});`;
+
+  const fallbackSnippet = `<script>
+  window.SupoSettings = {
+    productId: "${productId}",
+    apiBaseUrl: "${apiBaseUrl}",
+    appearance: ${appearanceSnippet.replaceAll("\n", "\n    ")}
+  };
+</script>
+<script async src="${widgetUrl}"></script>`;
+
+  const frameworkSnippets: Record<FrameworkTab, string> = {
+    react: reactSnippet,
+    nextjs: reactSnippet,
+    vite: `npm install @supo/widget
+
+${reactSnippet}`,
+    vanilla: vanillaSnippet,
+  };
+
+  const copyCode = async (key: string, code: string) => {
+    await navigator.clipboard.writeText(code);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
 
   const set = <Key extends keyof WidgetConfigValues>(
     key: Key,
@@ -274,258 +364,131 @@ export function WidgetConfigurator({
     });
   };
 
-  const copyCode = async (key: string, code: string) => {
-    await navigator.clipboard.writeText(code);
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(null), 2000);
-  };
-
-  const segmentBase =
-    "flex-1 px-3 py-1.5 text-center text-xs transition-colors duration-150";
-  const segmentActive = "bg-[color:var(--card-elevated)] text-foreground";
-  const segmentInactive =
-    "text-[color:var(--text-secondary)] hover:text-foreground";
   const segmentClass = (active: boolean) =>
-    `${segmentBase} ${active ? segmentActive : segmentInactive}`;
-
-  const serverDefaultsJson = useMemo(() => JSON.stringify(config, null, 2), [config]);
-
-  const typeSnippet = `type SupoCustomer = { name: string; email: string };
-
-type SupoSettings = {
-  productId: string;
-  apiUrl?: string;
-  customer?: SupoCustomer | (() => SupoCustomer | null);
-  appearance?: {
-    theme?: "dark" | "light";
-    position?: "bottom-right" | "bottom-left";
-    accentColor?: \`#\${string}\`;
-    launcherLabel?: string;
-    launcherStyle?: "icon" | "icon-label";
-    panelSize?: "compact" | "standard" | "wide";
-    borderRadius?: "soft" | "rounded" | "square";
-    botName?: string;
-    greeting?: string;
-    introTitle?: string;
-    introDescription?: string;
-    inputPlaceholder?: string;
-    agentHandoffLabel?: string;
-    showPoweredBy?: boolean;
-  };
-  behavior?: {
-    startOpen?: boolean;
-    hideLauncher?: boolean;
-  };
-  hooks?: {
-    onReady?: () => void;
-    onOpen?: () => void;
-    onClose?: () => void;
-    onError?: (error: { message: string }) => void;
-    onEscalationChange?: (status: "pending" | "active" | null) => void;
-  };
-};
-
-type SupoRuntime = {
-  open: () => void;
-  close: () => void;
-  toggle: () => void;
-  identify: (customer: SupoCustomer) => boolean;
-  reset: () => void;
-};
-
-declare global {
-  interface Window {
-    SupoSettings?: SupoSettings;
-    Supo?: SupoRuntime;
-  }
-}`;
-
-  const runtimeSnippet = `window.Supo?.open();
-window.Supo?.identify({ name: "Jane Smith", email: "jane@example.com" });
-window.Supo?.toggle();
-window.Supo?.reset();
-
-window.addEventListener("supo:ready", () => {
-  console.log("Supo widget is ready");
-});
-
-window.addEventListener("supo:escalation-change", (event) => {
-  console.log("Handoff status", event.detail.status);
-});`;
-
-  const snippets: Record<IntegrationTab, string> = {
-    html: `<script>
-  window.SupoSettings = {
-    productId: "${productId}",
-    appearance: {
-      theme: "dark",
-      accentColor: "#18181b",
-      launcherStyle: "icon-label",
-      launcherLabel: "Support"
-    },
-    behavior: {
-      startOpen: false,
-      hideLauncher: false
-    },
-    hooks: {
-      onReady: function () {
-        console.log("Supo is ready");
-      }
-    }
-  };
-</script>
-<script src="${widgetUrl}" async></script>`,
-
-    nextjs: `// app/SupoWidget.tsx
-"use client";
-
-import { useEffect } from "react";
-import Script from "next/script";
-
-export function SupoWidget({ user }: { user?: { name: string; email: string } }) {
-  const settings = {
-    productId: "${productId}",
-    customer: user ? { name: user.name, email: user.email } : undefined,
-    appearance: {
-      theme: "dark",
-      accentColor: "#18181b",
-      launcherStyle: "icon-label",
-      launcherLabel: "Support"
-    }
-  };
-
-  useEffect(() => {
-    const onEscalation = (event: Event) => {
-      console.log("Supo handoff status", (event as CustomEvent).detail.status);
-    };
-    window.addEventListener("supo:escalation-change", onEscalation);
-    return () => window.removeEventListener("supo:escalation-change", onEscalation);
-  }, []);
-
-  return (
-    <>
-      <Script
-        id="supo-settings"
-        strategy="beforeInteractive"
-        dangerouslySetInnerHTML={{
-          __html: \`window.SupoSettings = \${JSON.stringify(settings)};\`,
-        }}
-      />
-      <Script src="${widgetUrl}" strategy="afterInteractive" />
-    </>
-  );
-}`,
-
-    react: `// SupoWidgetLoader.tsx
-import { useEffect } from "react";
-
-export function SupoWidgetLoader({ user }: { user?: { name: string; email: string } }) {
-  useEffect(() => {
-    window.SupoSettings = {
-      productId: "${productId}",
-      customer: user ? { name: user.name, email: user.email } : undefined,
-      appearance: {
-        theme: "dark",
-        position: "bottom-right",
-        accentColor: "#18181b",
-        panelSize: "standard"
-      },
-      behavior: {
-        startOpen: false
-      }
-    };
-
-    if (!document.getElementById("supo-widget-script")) {
-      const script = document.createElement("script");
-      script.id = "supo-widget-script";
-      script.src = "${widgetUrl}";
-      script.async = true;
-      document.body.appendChild(script);
-    }
-  }, [user]);
-
-  return null;
-}`,
-
-    cms: `<!-- Paste this in the footer/custom-code area. -->
-<script>
-  window.SupoSettings = {
-    productId: "${productId}",
-    appearance: {
-      launcherStyle: "icon-label",
-      launcherLabel: "Support"
-    }
-  };
-</script>
-<script src="${widgetUrl}" async></script>`,
-  };
-
-  const integrationTabs: { id: IntegrationTab; label: string }[] = [
-    { id: "nextjs", label: "Next.js" },
-    { id: "react", label: "React/Vite" },
-    { id: "html", label: "HTML" },
-    { id: "cms", label: "CMS" },
-  ];
+    `px-3 py-1.5 text-xs transition-colors duration-150 ${
+      active
+        ? "bg-[color:var(--card-elevated)] text-foreground"
+        : "text-[color:var(--text-secondary)] hover:text-foreground"
+    }`;
 
   return (
     <div className="space-y-8">
-      <div className="flex overflow-hidden rounded-lg border border-border">
-        <button
-          type="button"
-          onClick={() => setMainTab("defaults")}
-          className={segmentClass(mainTab === "defaults")}
-        >
-          Defaults
-        </button>
-        <button
-          type="button"
-          onClick={() => setMainTab("developer")}
-          className={segmentClass(mainTab === "developer")}
-        >
-          Developer
-        </button>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {MAIN_TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 rounded-lg ${segmentClass(activeTab === tab.id)}`}
+            >
+              <tab.icon className="size-3.5" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {mainTab === "defaults" ? (
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[440px_1fr]">
+      {activeTab === "install" ? (
+        <div className="space-y-6">
+          <section className="rounded-lg border border-border bg-card p-6">
+            <p className="text-sm text-[color:var(--text-secondary)]">Recommended integration</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+              Install Supo as one dependency
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[color:var(--text-secondary)]">
+              Use `@supo/widget` for React, Next.js, Vite, vanilla TypeScript, and headless custom UI.
+              The package calls Supo APIs at runtime; developers do not load a remote widget script.
+            </p>
+            <div className="mt-5 grid gap-3 md:grid-cols-3">
+              <CodeBlock
+                title="Install"
+                code="npm install @supo/widget"
+                copyId="install-npm"
+                copiedKey={copiedKey}
+                onCopy={copyCode}
+              />
+              <div className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-4">
+                <p className="text-xs text-[color:var(--text-secondary)]">Product id</p>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <code className="truncate font-mono text-sm text-foreground">{productId}</code>
+                  <button
+                    type="button"
+                    onClick={() => copyCode("product-id", productId)}
+                    className="rounded-md p-1.5 text-[color:var(--text-secondary)] hover:bg-card hover:text-foreground"
+                  >
+                    {copiedKey === "product-id" ? <Check className="size-4" /> : <Copy className="size-4" />}
+                  </button>
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-4">
+                <p className="text-xs text-[color:var(--text-secondary)]">Integration health</p>
+                <div className="mt-3 space-y-2 text-xs text-[color:var(--text-secondary)]">
+                  <p>Config route: `/api/widget/config`</p>
+                  <p>Realtime: Ably with polling fallback</p>
+                  <p>Local API: {apiBaseUrl}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex overflow-hidden rounded-lg border border-border">
+              {FRAMEWORK_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setFrameworkTab(tab.id)}
+                  className={`flex-1 ${segmentClass(frameworkTab === tab.id)}`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <CodeBlock
+              title={`Use with ${FRAMEWORK_TABS.find((tab) => tab.id === frameworkTab)?.label}`}
+              code={frameworkSnippets[frameworkTab]}
+              copyId={`framework-${frameworkTab}`}
+              copiedKey={copiedKey}
+              onCopy={copyCode}
+            />
+          </section>
+        </div>
+      ) : null}
+
+      {activeTab === "configure" ? (
+        <div className="grid gap-6 xl:grid-cols-[440px_1fr]">
           <div className="space-y-4">
             <Section
-              title="Brand"
-              description="Saved product-wide defaults. Developers can override these at runtime from their own codebase."
+              title="Saved defaults"
+              description="These values live in Supo and act as fallback defaults. SDK options override them per app, page, or user."
             >
               <div className="space-y-2">
-                <Label htmlFor="botName" className="text-sm text-[color:var(--text-secondary)]">
-                  Bot name
-                </Label>
+                <Label htmlFor="botName">Bot name</Label>
                 <Input
                   id="botName"
                   value={config.botName}
-                  onChange={(e) => set("botName", e.target.value)}
-                  placeholder="Support"
+                  onChange={(event) => set("botName", event.target.value)}
                   maxLength={WIDGET_CONFIG_LIMITS.botName}
                 />
               </div>
-
               <div className="space-y-2">
-                <Label className="text-sm text-[color:var(--text-secondary)]">Theme</Label>
+                <Label>Theme</Label>
                 <div className="flex overflow-hidden rounded-lg border border-border">
                   {WIDGET_THEMES.map((theme) => (
                     <button
                       key={theme}
                       type="button"
                       onClick={() => set("theme", theme)}
-                      className={`${segmentClass(config.theme === theme)} capitalize`}
+                      className={`flex-1 capitalize ${segmentClass(config.theme === theme)}`}
                     >
                       {theme}
                     </button>
                   ))}
                 </div>
               </div>
-
               <div className="space-y-2">
-                <Label className="text-sm text-[color:var(--text-secondary)]">
-                  Accent color
-                </Label>
+                <Label>Accent color</Label>
                 <div className="flex items-center gap-2">
                   {ACCENT_COLORS.map((color) => (
                     <button
@@ -533,338 +496,226 @@ export function SupoWidgetLoader({ user }: { user?: { name: string; email: strin
                       type="button"
                       title={color.label}
                       onClick={() => set("accentColor", color.value)}
-                      className="relative flex h-7 w-7 items-center justify-center rounded-full transition-transform duration-150 hover:scale-110"
+                      className="flex h-7 w-7 items-center justify-center rounded-full"
                       style={{ background: color.value }}
                     >
-                      {config.accentColor === color.value ? (
-                        <Check className="size-3.5 text-white" strokeWidth={3} />
-                      ) : null}
+                      {config.accentColor === color.value ? <Check className="size-3 text-white" /> : null}
                     </button>
                   ))}
                 </div>
               </div>
-            </Section>
-
-            <Section
-              title="Launcher"
-              description="Controls where the hosted launcher appears when no runtime override is provided."
-            >
               <div className="space-y-2">
-                <Label className="text-sm text-[color:var(--text-secondary)]">Position</Label>
-                <div className="flex overflow-hidden rounded-lg border border-border">
-                  {WIDGET_POSITIONS.map((position) => (
-                    <button
-                      key={position}
-                      type="button"
-                      onClick={() => set("position", position)}
-                      className={segmentClass(config.position === position)}
-                    >
-                      {formatOption(position)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm text-[color:var(--text-secondary)]">
-                  Launcher style
-                </Label>
+                <Label>Launcher style</Label>
                 <div className="flex overflow-hidden rounded-lg border border-border">
                   {WIDGET_LAUNCHER_STYLES.map((style) => (
                     <button
                       key={style}
                       type="button"
                       onClick={() => set("launcherStyle", style)}
-                      className={segmentClass(config.launcherStyle === style)}
+                      className={`flex-1 ${segmentClass(config.launcherStyle === style)}`}
                     >
                       {style === "icon" ? "Icon" : "Icon + label"}
                     </button>
                   ))}
                 </div>
               </div>
-
               <div className="space-y-2">
-                <Label
-                  htmlFor="launcherLabel"
-                  className="text-sm text-[color:var(--text-secondary)]"
-                >
-                  Launcher label
-                </Label>
+                <Label htmlFor="launcherLabel">Launcher label</Label>
                 <Input
                   id="launcherLabel"
                   value={config.launcherLabel}
-                  onChange={(e) => set("launcherLabel", e.target.value)}
-                  placeholder="Support"
+                  onChange={(event) => set("launcherLabel", event.target.value)}
                   maxLength={WIDGET_CONFIG_LIMITS.launcherLabel}
                 />
               </div>
-            </Section>
-
-            <Section
-              title="Panel"
-              description="Controls the default size and shape of the chat surface."
-            >
-              <div className="space-y-2">
-                <Label className="text-sm text-[color:var(--text-secondary)]">Size</Label>
-                <div className="flex overflow-hidden rounded-lg border border-border">
-                  {WIDGET_PANEL_SIZES.map((size) => (
-                    <button
-                      key={size}
-                      type="button"
-                      onClick={() => set("panelSize", size)}
-                      className={segmentClass(config.panelSize === size)}
-                    >
-                      {formatOption(size)}
-                    </button>
-                  ))}
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Position</Label>
+                  <select
+                    value={config.position}
+                    onChange={(event) => set("position", event.target.value as WidgetConfigValues["position"])}
+                    className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground"
+                  >
+                    {WIDGET_POSITIONS.map((position) => (
+                      <option key={position} value={position}>
+                        {formatOption(position)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Panel size</Label>
+                  <select
+                    value={config.panelSize}
+                    onChange={(event) => set("panelSize", event.target.value as WidgetConfigValues["panelSize"])}
+                    className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground"
+                  >
+                    {WIDGET_PANEL_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {formatOption(size)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Radius</Label>
+                  <select
+                    value={config.borderRadius}
+                    onChange={(event) => set("borderRadius", event.target.value as WidgetConfigValues["borderRadius"])}
+                    className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground"
+                  >
+                    {WIDGET_BORDER_RADII.map((radius) => (
+                      <option key={radius} value={radius}>
+                        {formatOption(radius)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-border bg-[color:var(--card-elevated)] px-3">
+                  <Label htmlFor="showPoweredBy">Powered by Supo</Label>
+                  <Switch
+                    id="showPoweredBy"
+                    checked={config.showPoweredBy}
+                    onCheckedChange={(checked) => set("showPoweredBy", checked)}
+                  />
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <Label className="text-sm text-[color:var(--text-secondary)]">Radius</Label>
-                <div className="flex overflow-hidden rounded-lg border border-border">
-                  {WIDGET_BORDER_RADII.map((radius) => (
-                    <button
-                      key={radius}
-                      type="button"
-                      onClick={() => set("borderRadius", radius)}
-                      className={segmentClass(config.borderRadius === radius)}
-                    >
-                      {formatOption(radius)}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </Section>
 
-            <Section
-              title="Copy"
-              description="Saved fallback customer-facing text inside the hosted widget."
-            >
+            <Section title="Copy defaults" description="Fallback text shown when the SDK does not override copy.">
               <div className="space-y-2">
-                <Label htmlFor="greeting" className="text-sm text-[color:var(--text-secondary)]">
-                  Greeting message
-                </Label>
+                <Label htmlFor="greeting">Greeting</Label>
                 <Textarea
                   id="greeting"
-                  value={config.greeting}
-                  onChange={(e) => set("greeting", e.target.value)}
-                  placeholder="Hi there! How can I help you today?"
                   rows={3}
+                  value={config.greeting}
+                  onChange={(event) => set("greeting", event.target.value)}
                   maxLength={WIDGET_CONFIG_LIMITS.greeting}
                   className="resize-none"
                 />
-                <p className="text-xs text-[color:var(--text-tertiary)]">
-                  {config.greeting.length}/{WIDGET_CONFIG_LIMITS.greeting}
-                </p>
               </div>
-
               <div className="space-y-2">
-                <Label htmlFor="introTitle" className="text-sm text-[color:var(--text-secondary)]">
-                  Intro title
-                </Label>
-                <Input
-                  id="introTitle"
-                  value={config.introTitle}
-                  onChange={(e) => set("introTitle", e.target.value)}
-                  maxLength={WIDGET_CONFIG_LIMITS.introTitle}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label
-                  htmlFor="introDescription"
-                  className="text-sm text-[color:var(--text-secondary)]"
-                >
-                  Intro description
-                </Label>
-                <Textarea
-                  id="introDescription"
-                  value={config.introDescription}
-                  onChange={(e) => set("introDescription", e.target.value)}
-                  rows={2}
-                  maxLength={WIDGET_CONFIG_LIMITS.introDescription}
-                  className="resize-none"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label
-                  htmlFor="inputPlaceholder"
-                  className="text-sm text-[color:var(--text-secondary)]"
-                >
-                  Input placeholder
-                </Label>
+                <Label htmlFor="inputPlaceholder">Input placeholder</Label>
                 <Input
                   id="inputPlaceholder"
                   value={config.inputPlaceholder}
-                  onChange={(e) => set("inputPlaceholder", e.target.value)}
+                  onChange={(event) => set("inputPlaceholder", event.target.value)}
                   maxLength={WIDGET_CONFIG_LIMITS.inputPlaceholder}
                 />
               </div>
-
-              <div className="space-y-2">
-                <Label
-                  htmlFor="agentHandoffLabel"
-                  className="text-sm text-[color:var(--text-secondary)]"
-                >
-                  Handoff button label
-                </Label>
-                <Input
-                  id="agentHandoffLabel"
-                  value={config.agentHandoffLabel}
-                  onChange={(e) => set("agentHandoffLabel", e.target.value)}
-                  maxLength={WIDGET_CONFIG_LIMITS.agentHandoffLabel}
-                />
-              </div>
             </Section>
-
-            <Section
-              title="Footer"
-              description="Controls optional Supo attribution. The beta notice remains visible during alpha."
-            >
-              <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-[color:var(--card-elevated)] p-3">
-                <div>
-                  <Label htmlFor="showPoweredBy" className="text-sm text-foreground">
-                    Show powered by Supo
-                  </Label>
-                  <p className="mt-1 text-xs text-[color:var(--text-secondary)]">
-                    Hides only the footer attribution, not the beta testing notice.
-                  </p>
-                </div>
-                <Switch
-                  id="showPoweredBy"
-                  checked={config.showPoweredBy}
-                  onCheckedChange={(checked) => set("showPoweredBy", checked)}
-                />
-              </div>
-            </Section>
-
             <Button
               onClick={handleSave}
               disabled={isPending}
               className="w-full rounded-lg bg-foreground text-background hover:bg-foreground/90"
             >
-              {saved ? (
-                <span className="flex items-center gap-1.5">
-                  <Check className="size-3.5" />
-                  Saved
-                </span>
-              ) : isPending ? (
-                "Saving..."
-              ) : (
-                "Save defaults"
-              )}
+              {saved ? "Saved" : isPending ? "Saving..." : "Save defaults"}
             </Button>
           </div>
 
-          <div className="flex flex-col">
-            <p className="mb-3 text-xs text-[color:var(--text-secondary)]">Preview</p>
-            <div className="sticky top-8">
-              <WidgetPreview {...config} />
-            </div>
+          <div className="space-y-4">
+            <CodeBlock
+              title="Generated appearance object"
+              code={`appearance: ${appearanceSnippet}`}
+              copyId="appearance"
+              copiedKey={copiedKey}
+              onCopy={copyCode}
+            />
+            <CodeBlock
+              title="Generated SupoProvider"
+              code={reactSnippet}
+              copyId="provider-config"
+              copiedKey={copiedKey}
+              onCopy={copyCode}
+            />
+            <CodeBlock
+              title="Generated initSupo"
+              code={vanillaSnippet}
+              copyId="init-config"
+              copiedKey={copiedKey}
+              onCopy={copyCode}
+            />
           </div>
         </div>
-      ) : (
-        <div className="space-y-6">
+      ) : null}
+
+      {activeTab === "preview" ? (
+        <div className="grid gap-6 xl:grid-cols-[320px_1fr]">
           <section className="rounded-lg border border-border bg-card p-5">
-            <p className="text-sm font-medium text-foreground">Runtime contract</p>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[color:var(--text-secondary)]">
-              The hosted widget loads these saved defaults, then applies values from
-              `window.SupoSettings`. Runtime overrides stay in the customer app and do not
-              write back to Supo.
-            </p>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {[
-                "Saved defaults come from this Widget page.",
-                "Runtime appearance overrides win per page load.",
-                "Customer identity can be passed from the host app.",
-              ].map((item) => (
-                <div
-                  key={item}
-                  className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-3 text-xs leading-relaxed text-[color:var(--text-secondary)]"
-                >
-                  {item}
-                </div>
-              ))}
+            <p className="text-sm font-medium text-foreground">Preview modes</p>
+            <div className="mt-4 space-y-4">
+              <label className="flex items-center justify-between gap-3 text-sm text-[color:var(--text-secondary)]">
+                Identified customer
+                <Switch checked={previewIdentified} onCheckedChange={setPreviewIdentified} />
+              </label>
+              <label className="flex items-center justify-between gap-3 text-sm text-[color:var(--text-secondary)]">
+                Hidden launcher
+                <Switch checked={previewHiddenLauncher} onCheckedChange={setPreviewHiddenLauncher} />
+              </label>
+              <Button variant="outline" className="w-full rounded-lg" onClick={() => setPreviewIdentified(false)}>
+                Reset preview
+              </Button>
+            </div>
+            <div className="mt-5 rounded-lg border border-border bg-[color:var(--card-elevated)] p-3 font-mono text-xs text-[color:var(--text-secondary)]">
+              <p>isOpen: true</p>
+              <p>customer: {previewIdentified ? "identified" : "anonymous"}</p>
+              <p>realtime: auto</p>
+              <p>fallback: polling</p>
             </div>
           </section>
-
-          <section className="space-y-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Framework snippet</p>
-              <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
-                Choose the install shape closest to the customer codebase.
-              </p>
-            </div>
-            <div className="flex overflow-hidden rounded-lg border border-border">
-              {integrationTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveSnippet(tab.id)}
-                  className={segmentClass(activeSnippet === tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-            <CodeBlock
-              code={snippets[activeSnippet]}
-              copyId={`snippet-${activeSnippet}`}
-              copiedKey={copiedKey}
-              onCopy={copyCode}
-            />
-          </section>
-
-          <section className="space-y-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">TypeScript contract</p>
-              <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
-                Drop this into the customer app if they want typed `window.SupoSettings`
-                and `window.Supo`.
-              </p>
-            </div>
-            <CodeBlock
-              code={typeSnippet}
-              copyId="types"
-              copiedKey={copiedKey}
-              onCopy={copyCode}
-            />
-          </section>
-
-          <section className="space-y-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Runtime controls and events</p>
-              <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
-                Use these when the host app owns the help button, user identity, or analytics.
-              </p>
-            </div>
-            <CodeBlock
-              code={runtimeSnippet}
-              copyId="runtime"
-              copiedKey={copiedKey}
-              onCopy={copyCode}
-            />
-          </section>
-
-          <section className="space-y-3">
-            <div>
-              <p className="text-sm font-medium text-foreground">Server defaults JSON</p>
-              <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
-                This is the current saved configuration the hosted widget loads before runtime
-                overrides.
-              </p>
-            </div>
-            <CodeBlock
-              code={serverDefaultsJson}
-              copyId="server-defaults"
-              copiedKey={copiedKey}
-              onCopy={copyCode}
-            />
-          </section>
+          <WidgetPreview
+            config={config}
+            identified={previewIdentified}
+            hiddenLauncher={previewHiddenLauncher}
+          />
         </div>
-      )}
+      ) : null}
+
+      {activeTab === "reference" ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          {[
+            ["Core", "initSupo(options) mounts the default widget and returns open, close, toggle, identify, reset, destroy, getState, and on."],
+            ["React", "Use @supo/widget/react for SupoProvider, SupoWidget, useSupo, and useSupoState."],
+            ["Headless", "Use @supo/widget/headless when the host app owns the full chat UI."],
+            ["Identity", "Pass customer or call identify() to skip the built-in identity form and scope storage by email."],
+            ["Realtime", "The SDK uses Ably when available and polling as a fallback. Set realtime: 'polling' to skip realtime."],
+            ["Local dev", "Pass apiBaseUrl when testing against localhost or a self-hosted Supo deployment."],
+          ].map(([title, body]) => (
+            <section key={title} className="rounded-lg border border-border bg-card p-5">
+              <p className="text-sm font-medium text-foreground">{title}</p>
+              <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">{body}</p>
+            </section>
+          ))}
+          <div className="md:col-span-2">
+            <CodeBlock
+              title="Headless client"
+              code={headlessSnippet}
+              copyId="headless"
+              copiedKey={copiedKey}
+              onCopy={copyCode}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "fallback" ? (
+        <div className="space-y-4">
+          <section className="rounded-lg border border-border bg-card p-5">
+            <p className="text-sm font-medium text-foreground">Fallback embed</p>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[color:var(--text-secondary)]">
+              Use this only when npm packages are unavailable, such as WordPress, Webflow,
+              Shopify custom code, or a basic CMS footer field.
+            </p>
+          </section>
+          <CodeBlock
+            title="CMS script fallback"
+            code={fallbackSnippet}
+            copyId="fallback"
+            copiedKey={copiedKey}
+            onCopy={copyCode}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -34,6 +34,7 @@ export default async function WidgetPage({
         productId={id}
         initialConfig={initialConfig}
         widgetUrl={`${env.BETTER_AUTH_URL}/widget.js`}
+        apiBaseUrl={env.BETTER_AUTH_URL}
       />
     </div>
   );
