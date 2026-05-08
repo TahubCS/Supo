@@ -1,7 +1,7 @@
-import { CheckCircle2, Code2, LifeBuoy, Package, Radio, ShieldCheck, Terminal } from "lucide-react";
+import { CheckCircle2, Code2, LifeBuoy, Package, Terminal } from "lucide-react";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { env } from "@/lib/env";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
@@ -13,21 +13,27 @@ function CodeBlock({ code }: { code: string }) {
   );
 }
 
-function InfoCard({
-  icon: Icon,
+function Section({
   title,
-  body,
+  description,
+  children,
 }: {
-  icon: typeof Package;
   title: string;
-  body: string;
+  description?: string;
+  children: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-5">
-      <Icon className="size-5 text-[color:var(--text-secondary)]" />
-      <h2 className="mt-4 text-sm font-medium text-foreground">{title}</h2>
-      <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">{body}</p>
-    </div>
+    <section className="border-t border-border pt-8">
+      <div className="mb-4 max-w-3xl">
+        <h2 className="text-xl font-semibold tracking-tight text-foreground">{title}</h2>
+        {description ? (
+          <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -47,7 +53,7 @@ export default async function DeveloperDocsPage({
 
   const reactSnippet = `"use client";
 
-import { SupoProvider, SupoWidget, useSupo } from "@supo/widget/react";
+import { SupoProvider, SupoWidget } from "@supoapp/widget/react";
 
 export function AppShell({ user, children }) {
   return (
@@ -55,62 +61,32 @@ export function AppShell({ user, children }) {
       productId="${id}"
       apiBaseUrl="${apiBaseUrl}"
       customer={{ name: user.name, email: user.email }}
-      appearance={{ launcherStyle: "icon-label", launcherLabel: "Support" }}
     >
       {children}
       <SupoWidget />
     </SupoProvider>
   );
-}
-
-export function HelpButton() {
-  const supo = useSupo();
-  return <button onClick={() => supo.open()}>Contact support</button>;
 }`;
 
-  const vanillaSnippet = `import { initSupo } from "@supo/widget";
+  const vanillaSnippet = `import { initSupo } from "@supoapp/widget";
 
 const supo = initSupo({
-  productId: "${id}",
-  apiBaseUrl: "${apiBaseUrl}",
-  customer: () => window.currentUser ?? null,
-  appearance: {
-    theme: "dark",
-    launcherStyle: "icon-label",
-    launcherLabel: "Support",
-  },
-});
-
-document.querySelector("#help")?.addEventListener("click", () => {
-  supo.open();
-});`;
-
-  const headlessSnippet = `import { createSupoClient } from "@supo/widget/headless";
-
-const client = createSupoClient({
   productId: "${id}",
   apiBaseUrl: "${apiBaseUrl}",
   customer: { name: user.name, email: user.email },
 });
 
-const answer = await client.sendMessage("I need help with billing");
+supo.open();`;
 
-client.on("message", (message) => {
-  console.log(message);
-});`;
+  const headlessSnippet = `import { createSupoClient } from "@supoapp/widget/headless";
 
-  const runtimeSnippet = `const supo = initSupo({ productId: "${id}" });
+const supo = createSupoClient({
+  productId: "${id}",
+  apiBaseUrl: "${apiBaseUrl}",
+  customer: { name: user.name, email: user.email },
+});
 
-supo.open();
-supo.close();
-supo.toggle();
-supo.identify({ name: "Jane Smith", email: "jane@example.com" });
-supo.reset();
-supo.destroy();
-
-supo.on("escalation-change", ({ status }) => {
-  console.log("Handoff status", status);
-});`;
+const reply = await supo.sendMessage("I need help with billing");`;
 
   const fallbackSnippet = `<script>
   window.SupoSettings = {
@@ -121,159 +97,151 @@ supo.on("escalation-change", ({ status }) => {
 <script async src="${widgetUrl}"></script>`;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8 px-8 py-8">
-      <div className="space-y-3">
-        <Badge variant="outline" className="w-fit rounded-full text-xs">
-          Primary SDK path
-        </Badge>
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-            Developer docs
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[color:var(--text-secondary)]">
-            Install Supo with one package. React helpers, vanilla TypeScript, and headless
-            custom UI all ship from <code>@supo/widget</code>. The hosted script remains
-            available only for CMS and no-code environments.
-          </p>
-        </div>
-      </div>
+    <div className="space-y-8 px-8 py-8">
+      <header className="max-w-4xl">
+        <p className="mb-3 text-sm text-[color:var(--text-secondary)]">Widget setup</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground">Setup guide</h1>
+        <p className="mt-3 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+          This page explains what the Supo widget SDK does and the simplest ways to add it to a
+          product. The Widget page is still where you configure defaults and preview behavior.
+        </p>
+      </header>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <InfoCard
-          icon={Package}
-          title="One dependency"
-          body="Use @supo/widget for React, Next.js, Vite, vanilla TypeScript, and headless custom UI."
-        />
-        <InfoCard
-          icon={ShieldCheck}
-          title="Public product id"
-          body="The product id scopes config, conversations, polling, and realtime tokens. Never expose private API keys."
-        />
-        <InfoCard
-          icon={Radio}
-          title="Realtime fallback"
-          body="The SDK uses Ably when available and keeps secure polling as the fallback path."
-        />
-        <InfoCard
-          icon={Terminal}
-          title="Local API base"
-          body="SDK users do not load a remote script, but they still pass apiBaseUrl for local or self-hosted Supo APIs."
-        />
-      </div>
-
-      <section className="rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center gap-2">
-          <CheckCircle2 className="size-4 text-[color:var(--text-secondary)]" />
-          <h2 className="text-sm font-medium text-foreground">Install</h2>
-        </div>
-        <div className="mt-4">
-          <CodeBlock code="npm install @supo/widget" />
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <p className="mb-1 text-sm font-medium text-foreground">React and Next.js</p>
-          <p className="text-sm text-[color:var(--text-secondary)]">
-            Import React helpers from <code>@supo/widget/react</code>. Use this in a client component.
-          </p>
-        </div>
-        <CodeBlock code={reactSnippet} />
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <p className="mb-1 text-sm font-medium text-foreground">Vanilla TypeScript</p>
-          <p className="text-sm text-[color:var(--text-secondary)]">
-            Use the core runtime when the host app is not React.
-          </p>
-        </div>
-        <CodeBlock code={vanillaSnippet} />
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <p className="mb-1 text-sm font-medium text-foreground">Headless custom UI</p>
-          <p className="text-sm text-[color:var(--text-secondary)]">
-            Use the headless client when the customer app owns the entire chat interface.
-          </p>
-        </div>
-        <CodeBlock code={headlessSnippet} />
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <p className="mb-1 text-sm font-medium text-foreground">Runtime API</p>
-          <p className="text-sm text-[color:var(--text-secondary)]">
-            The runtime exposes methods and events for custom launchers, logout handling, and analytics.
-          </p>
-        </div>
-        <CodeBlock code={runtimeSnippet} />
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center gap-2">
-          <Code2 className="size-4 text-[color:var(--text-secondary)]" />
-          <h2 className="text-sm font-medium text-foreground">Canonical SDK routes</h2>
-        </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {[
-            "GET /api/widget/config",
-            "POST /api/widget/messages",
-            "POST /api/widget/escalations",
-            "GET /api/widget/messages/poll",
-            "GET /api/widget/realtime/token",
-          ].map((route) => (
-            <div key={route} className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-3 font-mono text-xs text-[color:var(--text-secondary)]">
-              {route}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="space-y-4">
-        <div>
-          <p className="mb-1 text-sm font-medium text-foreground">Fallback embed</p>
-          <p className="text-sm text-[color:var(--text-secondary)]">
-            Use this only where npm packages are unavailable, such as a CMS footer field.
-          </p>
-        </div>
-        <CodeBlock code={fallbackSnippet} />
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-5">
-        <div className="flex items-center gap-2">
-          <LifeBuoy className="size-4 text-[color:var(--text-secondary)]" />
-          <h2 className="text-sm font-medium text-foreground">Troubleshooting</h2>
-        </div>
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          {[
-            {
-              title: "Widget does not show",
-              body: "Confirm the SDK is initialized in the browser, productId is correct, and apiBaseUrl points at this Supo app during local development.",
-            },
-            {
-              title: "Messages do not create conversations",
-              body: "Check /api/widget/messages in the network tab. Invalid product ids, invalid customer email, or rate limits are the usual causes.",
-            },
-            {
-              title: "Conversation does not continue",
-              body: "The SDK stores x-conversation-id and x-conversation-token by product and customer email. Use reset() to clear stale local tests.",
-            },
-            {
-              title: "Realtime is unavailable",
-              body: "The SDK automatically falls back to /api/widget/messages/poll. Set realtime: 'polling' to skip realtime entirely.",
-            },
-          ].map((item) => (
-            <div key={item.title} className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-4">
-              <p className="text-sm font-medium text-foreground">{item.title}</p>
-              <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
-                {item.body}
+      <Section title="What we built">
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="flex items-start gap-3">
+            <Package className="mt-0.5 size-5 shrink-0 text-[color:var(--text-secondary)]" />
+            <div className="min-w-0 space-y-3 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+              <p>
+                Supo now has one main widget package: <code>@supoapp/widget</code>. Developers install
+                that package in their app and control the widget from their own codebase.
               </p>
+              <ul className="space-y-2">
+                <li>
+                  <code>@supoapp/widget</code> mounts the normal browser widget.
+                </li>
+                <li>
+                  <code>@supoapp/widget/react</code> gives React and Next.js helpers.
+                </li>
+                <li>
+                  <code>@supoapp/widget/headless</code> lets teams build their own chat UI.
+                </li>
+                <li>The hosted script still works, but it is only the fallback for CMS/no-code sites.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Install"
+        description="Use this product id in every snippet. It tells Supo which product owns the widget, conversations, knowledge, and saved defaults."
+      >
+        <div className="grid gap-4 md:grid-cols-[1fr_1.2fr]">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <p className="text-xs text-[color:var(--text-tertiary)]">Product id</p>
+            <p className="mt-2 break-all font-mono text-sm text-foreground">{id}</p>
+          </div>
+          <CodeBlock code="npm install @supoapp/widget@alpha" />
+        </div>
+      </Section>
+
+      <Section
+        title="Use it in React or Next.js"
+        description="Put the provider in a client component near your app shell. This mounts the widget and identifies the logged-in user."
+      >
+        <CodeBlock code={reactSnippet} />
+      </Section>
+
+      <Section
+        title="Use it without React"
+        description="Use the core runtime in Vite, plain TypeScript, or any browser app that can import npm packages."
+      >
+        <CodeBlock code={vanillaSnippet} />
+      </Section>
+
+      <Section
+        title="Use your own chat UI"
+        description="Use the headless client when you want Supo's backend, persistence, escalation, and realtime behavior, but not Supo's default widget UI."
+      >
+        <CodeBlock code={headlessSnippet} />
+      </Section>
+
+      <Section title="What the SDK handles">
+        <div className="grid gap-3 md:grid-cols-2">
+          {[
+            "Loads saved widget defaults from Supo.",
+            "Applies runtime options from your code.",
+            "Stores customer and conversation tokens.",
+            "Sends customer messages to Supo.",
+            "Handles escalation to a human agent.",
+            "Uses realtime when available and polling as fallback.",
+          ].map((item) => (
+            <div key={item} className="flex items-start gap-3 rounded-lg border border-border bg-card p-4">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[color:var(--text-secondary)]" />
+              <p className="text-sm text-[color:var(--text-secondary)]">{item}</p>
             </div>
           ))}
         </div>
-      </section>
+      </Section>
+
+      <Section
+        title="Fallback embed"
+        description="Use this only when the site cannot install npm packages, such as WordPress, Webflow, Shopify custom code, or a CMS footer field."
+      >
+        <CodeBlock code={fallbackSnippet} />
+      </Section>
+
+      <Section
+        title="Under the hood"
+        description="The SDK calls Supo API routes at runtime. Developers using the SDK do not load a remote widget script, but they still send messages and config requests to this Supo app."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="rounded-lg border border-border bg-card p-5">
+            <div className="flex items-center gap-2">
+              <Code2 className="size-4 text-[color:var(--text-secondary)]" />
+              <h3 className="text-sm font-medium text-foreground">Routes</h3>
+            </div>
+            <div className="mt-4 space-y-2 font-mono text-xs text-[color:var(--text-secondary)]">
+              <p>GET /api/widget/config</p>
+              <p>POST /api/widget/messages</p>
+              <p>POST /api/widget/escalations</p>
+              <p>GET /api/widget/messages/poll</p>
+              <p>GET /api/widget/realtime/token</p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-border bg-card p-5">
+            <div className="flex items-center gap-2">
+              <Terminal className="size-4 text-[color:var(--text-secondary)]" />
+              <h3 className="text-sm font-medium text-foreground">Local development</h3>
+            </div>
+            <p className="mt-4 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+              Keep <code>apiBaseUrl</code> in local snippets so the SDK knows which Supo server to
+              call. Supo Cloud can default this later when the production domain is final.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Troubleshooting">
+        <div className="rounded-lg border border-border bg-card p-5">
+          <div className="flex items-center gap-2">
+            <LifeBuoy className="size-4 text-[color:var(--text-secondary)]" />
+            <h3 className="text-sm font-medium text-foreground">If the widget does not work</h3>
+          </div>
+          <div className="mt-4 space-y-3 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+            <p>Check that the SDK runs in the browser and that the product id matches this page.</p>
+            <p>
+              Check the browser network tab for <code>/api/widget/messages</code> when sending a
+              message.
+            </p>
+            <p>
+              Call <code>reset()</code> while testing if you want to clear the stored customer and
+              conversation.
+            </p>
+          </div>
+        </div>
+      </Section>
     </div>
   );
 }
