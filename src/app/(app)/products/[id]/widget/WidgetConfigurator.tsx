@@ -282,7 +282,7 @@ export function WidgetConfigurator({
 
   const reactSnippet = `"use client";
 
-import { SupoProvider, SupoWidget } from "@supo/widget/react";
+import { SupoProvider, SupoWidget } from "@supoapp/widget/react";
 
 export function SupportWidget({ user, children }) {
   return (
@@ -298,7 +298,7 @@ export function SupportWidget({ user, children }) {
   );
 }`;
 
-  const vanillaSnippet = `import { initSupo } from "@supo/widget";
+  const vanillaSnippet = `import { initSupo } from "@supoapp/widget";
 
 const supo = initSupo({
   productId: "${productId}",
@@ -311,7 +311,7 @@ document.querySelector("#help")?.addEventListener("click", () => {
   supo.open();
 });`;
 
-  const headlessSnippet = `import { createSupoClient } from "@supo/widget/headless";
+  const headlessSnippet = `import { createSupoClient } from "@supoapp/widget/headless";
 
 const client = createSupoClient({
   productId: "${productId}",
@@ -337,7 +337,7 @@ client.on("message", (message) => {
   const frameworkSnippets: Record<FrameworkTab, string> = {
     react: reactSnippet,
     nextjs: reactSnippet,
-    vite: `npm install @supo/widget
+    vite: `npm install @supoapp/widget@alpha
 
 ${reactSnippet}`,
     vanilla: vanillaSnippet,
@@ -397,13 +397,13 @@ ${reactSnippet}`,
               Install Supo as one dependency
             </h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-[color:var(--text-secondary)]">
-              Use `@supo/widget` for React, Next.js, Vite, vanilla TypeScript, and headless custom UI.
+              Use `@supoapp/widget` for React, Next.js, Vite, vanilla TypeScript, and headless custom UI.
               The package calls Supo APIs at runtime; developers do not load a remote widget script.
             </p>
             <div className="mt-5 grid gap-3 md:grid-cols-3">
               <CodeBlock
                 title="Install"
-                code="npm install @supo/widget"
+                code="npm install @supoapp/widget@alpha"
                 copyId="install-npm"
                 copiedKey={copiedKey}
                 onCopy={copyCode}
@@ -675,8 +675,8 @@ ${reactSnippet}`,
         <div className="grid gap-4 md:grid-cols-2">
           {[
             ["Core", "initSupo(options) mounts the default widget and returns open, close, toggle, identify, reset, destroy, getState, and on."],
-            ["React", "Use @supo/widget/react for SupoProvider, SupoWidget, useSupo, and useSupoState."],
-            ["Headless", "Use @supo/widget/headless when the host app owns the full chat UI."],
+            ["React", "Use @supoapp/widget/react for SupoProvider, SupoWidget, useSupo, and useSupoState."],
+            ["Headless", "Use @supoapp/widget/headless when the host app owns the full chat UI."],
             ["Identity", "Pass customer or call identify() to skip the built-in identity form and scope storage by email."],
             ["Realtime", "The SDK uses Ably when available and polling as a fallback. Set realtime: 'polling' to skip realtime."],
             ["Local dev", "Pass apiBaseUrl when testing against localhost or a self-hosted Supo deployment."],

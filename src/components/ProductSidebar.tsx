@@ -51,7 +51,7 @@ export function ProductSidebar({
     { href: `${base}/activity`, icon: MousePointerClick, label: "User activity", roles: ["admin", "developer", "agent"] },
     { href: `${base}/knowledge`, icon: BookOpen, label: "Knowledge", roles: ["admin", "developer"] },
     { href: `${base}/widget`, icon: Code2, label: "Widget", roles: ["admin", "developer"] },
-    { href: `${base}/docs`, icon: FileText, label: "Developer docs", roles: ["admin", "developer"] },
+    { href: `${base}/docs`, icon: FileText, label: "Setup guide", roles: ["admin", "developer"] },
     { href: `${base}/analytics`, icon: BarChart2, label: "Analytics", roles: ["admin"] },
     ...(isWorkspaceOwner
       ? [{ href: `${base}/team`, icon: Users, label: "Product team", roles: ["admin"] as ProductRole[] }]
