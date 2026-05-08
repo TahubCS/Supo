@@ -1,6 +1,6 @@
 {
   "name": "@supoapp/widget",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Official Supo browser widget SDK for React, vanilla TypeScript, and headless chat UI integrations.",
   "type": "module",
   "sideEffects": false,
@@ -30,7 +30,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "exports": {
     ".": {
@@ -49,7 +50,10 @@
   "scripts": {
     "build": "tsup",
     "build:legacy": "tsup --config tsup.legacy.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run typecheck && bun run build",
+    "pack:dry": "npm pack --dry-run --cache C:\\tmp\\npm-cache-supo",
+    "release:alpha": "npm publish --access public --tag alpha"
   },
   "dependencies": {
     "ably": "^2.21.0"
