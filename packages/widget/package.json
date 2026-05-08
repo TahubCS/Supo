@@ -1,0 +1,51 @@
+{
+  "name": "@supo/widget",
+  "version": "0.1.0-alpha.1",
+  "type": "module",
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./headless": {
+      "types": "./dist/headless.d.ts",
+      "import": "./dist/headless.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "build:legacy": "tsup --config tsup.legacy.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ably": "^2.21.0"
+  },
+  "peerDependencies": {
+    "react": ">=18 || >=19",
+    "react-dom": ">=18 || >=19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3"
+  }
+}
