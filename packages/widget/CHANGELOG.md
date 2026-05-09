@@ -2,6 +2,13 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.4
+
+- Added stable customer identity support through `customer.externalId`.
+- Added `customer.id` as an accepted alias that normalizes to `externalId`.
+- Made customer email optional when a stable external id is supplied.
+- Updated widget storage keys to prefer `external:{externalId}` while preserving email-based alpha conversation keys.
+
 ## 0.1.0-alpha.3
 
 - Changed the widget's "Powered by Supo" link to use the configured `apiBaseUrl` instead of a hardcoded Supo marketing URL.

@@ -17,8 +17,21 @@ export function createStorage(productId: string) {
   const customerKey = `supo_cust_${productId}`;
   const conversationKey = `supo_conv_${productId}`;
 
+  function identityKey(customer: SupoCustomer | null): string {
+    const externalId = customer?.externalId?.trim() || customer?.id?.trim();
+    if (externalId) return `external:${externalId}`;
+    const email = customer?.email?.trim().toLowerCase();
+    if (email) return `email:${email}`;
+    return "anonymous";
+  }
+
   function customerConversationKey(customer: SupoCustomer | null): string {
-    return `${conversationKey}_${customer?.email?.trim().toLowerCase() || "anonymous"}`;
+    return `${conversationKey}_${identityKey(customer)}`;
+  }
+
+  function legacyEmailConversationKey(customer: SupoCustomer | null): string | null {
+    const email = customer?.email?.trim().toLowerCase();
+    return email ? `${conversationKey}_${email}` : null;
   }
 
   return {
@@ -27,21 +40,27 @@ export function createStorage(productId: string) {
       if (!local) return null;
       try {
         const parsed = JSON.parse(local.getItem(customerKey) || "null") as SupoCustomer | null;
-        return parsed?.name && parsed?.email ? parsed : null;
+        return parsed?.externalId || parsed?.id || parsed?.email ? parsed : null;
       } catch {
         return null;
       }
     },
     setCustomer(customer: SupoCustomer) {
+      const externalId = customer.externalId?.trim() || customer.id?.trim();
+      const email = customer.email?.trim().toLowerCase();
       safeStorage("localStorage")?.setItem(
         customerKey,
-        JSON.stringify({ ...customer, email: customer.email.trim().toLowerCase() }),
+        JSON.stringify({ ...customer, externalId, id: undefined, email }),
       );
     },
     getConversation(customer: SupoCustomer | null): ConversationRef {
       const local = safeStorage("localStorage");
       const session = safeStorage("sessionStorage");
-      const raw = local?.getItem(customerConversationKey(customer)) ?? session?.getItem(conversationKey);
+      const legacyKey = legacyEmailConversationKey(customer);
+      const raw =
+        local?.getItem(customerConversationKey(customer)) ??
+        (legacyKey ? local?.getItem(legacyKey) : null) ??
+        session?.getItem(conversationKey);
       if (!raw) return { id: null, token: null };
       try {
         const parsed = JSON.parse(raw) as ConversationRef;
@@ -53,6 +72,8 @@ export function createStorage(productId: string) {
     setConversation(customer: SupoCustomer | null, id: string, token: string | null) {
       const value = JSON.stringify({ id, token });
       safeStorage("localStorage")?.setItem(customerConversationKey(customer), value);
+      const legacyKey = legacyEmailConversationKey(customer);
+      if (legacyKey) safeStorage("localStorage")?.setItem(legacyKey, value);
       safeStorage("sessionStorage")?.setItem(conversationKey, value);
     },
     clear() {

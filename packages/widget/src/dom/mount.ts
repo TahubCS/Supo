@@ -242,7 +242,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
     identify(nextCustomer) {
       const normalized = normalizeCustomer(nextCustomer);
       if (!normalized) {
-        emitError(new Error("Valid customer.name and customer.email are required."));
+        emitError(new Error("Valid customer.externalId/customer.id or customer.email is required."));
         return false;
       }
       customer = normalized;

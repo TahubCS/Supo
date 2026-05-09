@@ -24,7 +24,11 @@ export function AppShell({ user, children }) {
     <SupoProvider
       productId="YOUR_PRODUCT_ID"
       apiBaseUrl="https://your-supo-app.com"
-      customer={{ name: user.name, email: user.email }}
+      customer={{
+        externalId: user.id,
+        name: user.name,
+        email: user.email
+      }}
     >
       {children}
       <SupoWidget />
@@ -56,7 +60,11 @@ import { initSupo } from "@supoapp/widget";
 const supo = initSupo({
   productId: "YOUR_PRODUCT_ID",
   apiBaseUrl: "https://your-supo-app.com",
-  customer: { name: "Jane Smith", email: "jane@example.com" },
+  customer: {
+    externalId: "user_123",
+    name: "Jane Smith",
+    email: "jane@example.com",
+  },
   appearance: {
     launcherStyle: "icon-label",
     launcherLabel: "Support",
@@ -76,7 +84,11 @@ import { createSupoClient } from "@supoapp/widget/headless";
 const supo = createSupoClient({
   productId: "YOUR_PRODUCT_ID",
   apiBaseUrl: "https://your-supo-app.com",
-  customer: { name: "Jane Smith", email: "jane@example.com" },
+  customer: {
+    externalId: "user_123",
+    name: "Jane Smith",
+    email: "jane@example.com",
+  },
 });
 
 const reply = await supo.sendMessage("I need help with billing");
@@ -88,7 +100,7 @@ const reply = await supo.sendMessage("I need help with billing");
 type SupoInitOptions = {
   productId: string;
   apiBaseUrl?: string;
-  customer?: { name: string; email: string } | (() => { name: string; email: string } | null);
+  customer?: SupoCustomer | (() => SupoCustomer | null);
   appearance?: {
     theme?: "dark" | "light";
     position?: "bottom-right" | "bottom-left";
@@ -111,6 +123,16 @@ type SupoInitOptions = {
   };
   realtime?: "auto" | "polling";
 };
+
+type SupoCustomer = {
+  externalId?: string;
+  id?: string;
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+  locale?: string;
+  timezone?: string;
+};
 ```
 
 ## Runtime API
@@ -119,7 +141,7 @@ type SupoInitOptions = {
 supo.open();
 supo.close();
 supo.toggle();
-supo.identify({ name: "Jane Smith", email: "jane@example.com" });
+supo.identify({ externalId: "user_123", name: "Jane Smith", email: "jane@example.com" });
 supo.reset();
 supo.destroy();
 

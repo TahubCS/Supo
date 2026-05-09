@@ -26,10 +26,25 @@ function enumValue<T extends readonly string[]>(value: unknown, allowed: T): T[n
 
 export function normalizeCustomer(value: unknown): SupoCustomer | null {
   if (!isObject(value)) return null;
-  const name = text(value.name, 120);
+  const externalId = text(value.externalId ?? value.id, 191);
   const email = text(value.email, 254)?.toLowerCase();
-  if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
-  return { name, email };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  if (!externalId && !email) return null;
+  const name =
+    text(value.name, 120) ??
+    (email ? email.split("@")[0].slice(0, 120) : undefined) ??
+    `Customer ${externalId?.slice(0, 8)}`;
+  const avatarUrl = text(value.avatarUrl, 2048);
+  const locale = text(value.locale, 35);
+  const timezone = text(value.timezone, 64);
+  return {
+    externalId,
+    name,
+    email,
+    avatarUrl,
+    locale,
+    timezone,
+  };
 }
 
 export function normalizeAppearance(value: unknown): SupoAppearance {
