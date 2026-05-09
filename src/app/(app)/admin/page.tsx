@@ -54,7 +54,7 @@ type ConversationRow = {
   product_name: string;
   organization_name: string;
   customer_name: string;
-  customer_email: string;
+  customer_email: string | null;
   message_count: string;
   last_message_at: Date;
 };
@@ -435,7 +435,7 @@ export default async function AdminPage() {
                       {item.subject ?? "Untitled conversation"}
                     </p>
                     <p className="truncate text-xs text-[color:var(--text-secondary)]">
-                      {item.customer_name} ({item.customer_email})
+                      {item.customer_name} ({item.customer_email ?? "No email provided"})
                     </p>
                   </div>
                   <span className="shrink-0 rounded border border-border px-2 py-0.5 text-xs text-[color:var(--text-secondary)]">

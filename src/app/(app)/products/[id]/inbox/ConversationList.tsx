@@ -139,7 +139,7 @@ export function ConversationList({
       list = list.filter(
         (c) =>
           c.customer.name.toLowerCase().includes(q) ||
-          c.customer.email.toLowerCase().includes(q) ||
+          (c.customer.email ?? "").toLowerCase().includes(q) ||
           c.latestMessage?.body.toLowerCase().includes(q),
       );
     }

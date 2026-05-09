@@ -41,7 +41,7 @@ export type Suggestion = {
     subject: string | null;
     status: string;
     lastMessageAt: Date;
-    customer: { id: string; name: string; email: string } | null;
+    customer: { id: string; name: string; email: string | null } | null;
   } | null;
 };
 
@@ -186,7 +186,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
                 </Badge>
                 {customer ? (
                   <span className="text-xs text-[color:var(--text-secondary)]">
-                    From {customer.name} ({customer.email})
+                    From {customer.name} ({customer.email ?? "No email provided"})
                   </span>
                 ) : null}
               </div>

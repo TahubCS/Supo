@@ -1,4 +1,4 @@
-import { CheckCircle2, Code2, LifeBuoy, Package, Terminal } from "lucide-react";
+import { CheckCircle2, Code2, KeyRound, LifeBuoy, Package, Terminal } from "lucide-react";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -60,7 +60,11 @@ export function AppShell({ user, children }) {
     <SupoProvider
       productId="${id}"
       apiBaseUrl="${apiBaseUrl}"
-      customer={{ name: user.name, email: user.email }}
+      customer={{
+        externalId: user.id,
+        name: user.name,
+        email: user.email
+      }}
     >
       {children}
       <SupoWidget />
@@ -73,7 +77,11 @@ export function AppShell({ user, children }) {
 const supo = initSupo({
   productId: "${id}",
   apiBaseUrl: "${apiBaseUrl}",
-  customer: { name: user.name, email: user.email },
+  customer: {
+    externalId: user.id,
+    name: user.name,
+    email: user.email,
+  },
 });
 
 supo.open();`;
@@ -83,10 +91,23 @@ supo.open();`;
 const supo = createSupoClient({
   productId: "${id}",
   apiBaseUrl: "${apiBaseUrl}",
-  customer: { name: user.name, email: user.email },
+  customer: {
+    externalId: user.id,
+    name: user.name,
+    email: user.email,
+  },
 });
 
 const reply = await supo.sendMessage("I need help with billing");`;
+
+  const identitySnippet = `customer: {
+  externalId: user.id,   // stable id from your app
+  name: user.name,       // optional display name
+  email: user.email,     // optional contact email
+}
+
+// This also works. id is normalized to externalId.
+supo.identify({ id: user.id, name: user.name });`;
 
   const fallbackSnippet = `<script>
   window.SupoSettings = {
@@ -147,6 +168,31 @@ const reply = await supo.sendMessage("I need help with billing");`;
       </Section>
 
       <Section
+        title="Identify customers"
+        description="Pass your app's stable user id as externalId. Supo uses that id to keep the same customer, conversation history, escalation state, and future support context connected even if the user's email changes."
+      >
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+          <div className="rounded-lg border border-border bg-card p-5">
+            <div className="flex items-start gap-3">
+              <KeyRound className="mt-0.5 size-5 shrink-0 text-[color:var(--text-secondary)]" />
+              <div className="space-y-3 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+                <p>
+                  The important field is <code>externalId</code>. It should be the same id your
+                  product uses for the logged-in user.
+                </p>
+                <p>
+                  Email is still supported, but it is now contact data and a fallback identity for
+                  older installs. A customer with only <code>externalId</code> can still skip the
+                  widget&apos;s name/email form.
+                </p>
+              </div>
+            </div>
+          </div>
+          <CodeBlock code={identitySnippet} />
+        </div>
+      </Section>
+
+      <Section
         title="Use it in React or Next.js"
         description="Put the provider in a client component near your app shell. This mounts the widget and identifies the logged-in user."
       >
@@ -172,7 +218,7 @@ const reply = await supo.sendMessage("I need help with billing");`;
           {[
             "Loads saved widget defaults from Supo.",
             "Applies runtime options from your code.",
-            "Stores customer and conversation tokens.",
+            "Stores customer and conversation tokens by stable customer id.",
             "Sends customer messages to Supo.",
             "Handles escalation to a human agent.",
             "Uses realtime when available and polling as fallback.",

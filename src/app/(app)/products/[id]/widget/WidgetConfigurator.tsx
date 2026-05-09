@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy, MessageCircle, Package, Play, Settings2, Terminal, Wrench } from "lucide-react";
+import { Check, Copy, KeyRound, MessageCircle, Package, Play, Settings2, Terminal, Wrench } from "lucide-react";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -289,7 +289,11 @@ export function SupportWidget({ user, children }) {
     <SupoProvider
       productId="${productId}"
       apiBaseUrl="${apiBaseUrl}"
-      customer={{ name: user.name, email: user.email }}
+      customer={{
+        externalId: user.id,
+        name: user.name,
+        email: user.email
+      }}
       appearance={${appearanceSnippet.replaceAll("\n", "\n        ")}}
     >
       {children}
@@ -300,10 +304,19 @@ export function SupportWidget({ user, children }) {
 
   const vanillaSnippet = `import { initSupo } from "@supoapp/widget";
 
+const getCustomer = () =>
+  window.currentUser
+    ? {
+        externalId: window.currentUser.id,
+        name: window.currentUser.name,
+        email: window.currentUser.email,
+      }
+    : null;
+
 const supo = initSupo({
   productId: "${productId}",
   apiBaseUrl: "${apiBaseUrl}",
-  customer: () => window.currentUser ?? null,
+  customer: getCustomer,
   appearance: ${appearanceSnippet},
 });
 
@@ -316,13 +329,33 @@ document.querySelector("#help")?.addEventListener("click", () => {
 const client = createSupoClient({
   productId: "${productId}",
   apiBaseUrl: "${apiBaseUrl}",
-  customer: { name: user.name, email: user.email },
+  customer: {
+    externalId: user.id,
+    name: user.name,
+    email: user.email,
+  },
 });
 
 const answer = await client.sendMessage("I need help with billing");
 
 client.on("message", (message) => {
   console.log(message);
+});`;
+
+  const identitySnippet = `type SupoCustomer = {
+  externalId?: string;
+  id?: string; // alias for externalId
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+  locale?: string;
+  timezone?: string;
+};
+
+supo.identify({
+  externalId: user.id,
+  name: user.name,
+  email: user.email,
 });`;
 
   const fallbackSnippet = `<script>
@@ -400,7 +433,7 @@ ${reactSnippet}`,
               Use `@supoapp/widget` for React, Next.js, Vite, vanilla TypeScript, and headless custom UI.
               The package calls Supo APIs at runtime; developers do not load a remote widget script.
             </p>
-            <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <CodeBlock
                 title="Install"
                 code="npm install @supoapp/widget@alpha"
@@ -424,13 +457,32 @@ ${reactSnippet}`,
               <div className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-4">
                 <p className="text-xs text-[color:var(--text-secondary)]">Integration health</p>
                 <div className="mt-3 space-y-2 text-xs text-[color:var(--text-secondary)]">
+                  <p>Package: @supoapp/widget@alpha</p>
+                  <p>Identity: externalId preferred</p>
                   <p>Config route: `/api/widget/config`</p>
                   <p>Realtime: Ably with polling fallback</p>
-                  <p>Local API: {apiBaseUrl}</p>
                 </div>
+              </div>
+              <div className="rounded-lg border border-border bg-[color:var(--card-elevated)] p-4">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="size-4 text-[color:var(--text-secondary)]" />
+                  <p className="text-xs text-[color:var(--text-secondary)]">Customer identity</p>
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-[color:var(--text-secondary)]">
+                  Pass <code>externalId</code> from the host app session. Email is optional and only
+                  used as fallback contact data.
+                </p>
               </div>
             </div>
           </section>
+
+          <CodeBlock
+            title="Stable identity contract"
+            code={identitySnippet}
+            copyId="identity-contract"
+            copiedKey={copiedKey}
+            onCopy={copyCode}
+          />
 
           <section className="space-y-3">
             <div className="flex overflow-hidden rounded-lg border border-border">
@@ -659,6 +711,7 @@ ${reactSnippet}`,
             <div className="mt-5 rounded-lg border border-border bg-[color:var(--card-elevated)] p-3 font-mono text-xs text-[color:var(--text-secondary)]">
               <p>isOpen: true</p>
               <p>customer: {previewIdentified ? "identified" : "anonymous"}</p>
+              <p>identityKey: {previewIdentified ? "external:user_123" : "anonymous"}</p>
               <p>realtime: auto</p>
               <p>fallback: polling</p>
             </div>
@@ -677,7 +730,7 @@ ${reactSnippet}`,
             ["Core", "initSupo(options) mounts the default widget and returns open, close, toggle, identify, reset, destroy, getState, and on."],
             ["React", "Use @supoapp/widget/react for SupoProvider, SupoWidget, useSupo, and useSupoState."],
             ["Headless", "Use @supoapp/widget/headless when the host app owns the full chat UI."],
-            ["Identity", "Pass customer or call identify() to skip the built-in identity form and scope storage by email."],
+            ["Identity", "Pass customer.externalId or customer.id to skip the built-in identity form and scope storage by stable user id. Email still works as an alpha fallback."],
             ["Realtime", "The SDK uses Ably when available and polling as a fallback. Set realtime: 'polling' to skip realtime."],
             ["Local dev", "Pass apiBaseUrl when testing against localhost or a self-hosted Supo deployment."],
           ].map(([title, body]) => (

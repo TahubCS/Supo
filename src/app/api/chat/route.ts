@@ -6,7 +6,6 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import {
   conversation,
-  customer,
   message,
   product,
 } from "@/db/schema";
@@ -24,6 +23,11 @@ import {
   findWidgetConversation,
 } from "@/lib/widget-conversation-access";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
+import {
+  normalizeWidgetCustomer,
+  resolveWidgetCustomer,
+  type WidgetCustomerInput,
+} from "@/lib/widget-customer";
 
 export const maxDuration = 60;
 
@@ -36,10 +40,6 @@ const CORS: HeadersInit = {
 };
 // Cap widget messages to limit abuse and keep prompt size bounded.
 const MAX_WIDGET_MESSAGE_LENGTH = 2000;
-// Keep customer names within a practical UI/storage bound while allowing typical full names.
-const MAX_WIDGET_CUSTOMER_NAME_LENGTH = 120;
-// 254 is the commonly accepted maximum total length for an email address.
-const MAX_WIDGET_CUSTOMER_EMAIL_LENGTH = 254;
 
 export function OPTIONS() {
   return new Response(null, { status: 204, headers: CORS });
@@ -68,7 +68,7 @@ type ChatRequest = {
   message: string;
   conversationId?: string;
   conversationToken?: string;
-  customer: { name: string; email: string };
+  customer: WidgetCustomerInput;
 };
 
 function quotaErrorResponse(error: unknown) {
@@ -80,37 +80,6 @@ function quotaErrorResponse(error: unknown) {
   }
 
   return NextResponse.json({ error: error.message }, { status: error.status, headers });
-}
-
-function isValidCustomerEmail(email: string): boolean {
-  if (email.length > MAX_WIDGET_CUSTOMER_EMAIL_LENGTH || email.includes("..")) {
-    return false;
-  }
-
-  const parts = email.split("@");
-  if (parts.length !== 2) return false;
-
-  const [local, domain] = parts;
-  if (!local || !domain || local.length > 64 || !/^[^\s@]+$/.test(local)) {
-    return false;
-  }
-
-  const labels = domain.split(".");
-  if (labels.length < 2) return false;
-
-  const topLevelDomain = labels.at(-1);
-  if (!topLevelDomain || topLevelDomain.length < 2 || !/^[a-z]+$/i.test(topLevelDomain)) {
-    return false;
-  }
-
-  return labels.every(
-    (label) =>
-      label.length > 0 &&
-      label.length <= 63 &&
-      /^[a-z0-9-]+$/i.test(label) &&
-      !label.startsWith("-") &&
-      !label.endsWith("-"),
-  );
 }
 
 function shouldNotifyAgent(text: string, hasRelevantKnowledge: boolean): boolean {
@@ -142,26 +111,17 @@ export async function POST(req: NextRequest) {
     customer: customerInfo,
   } = body;
   const trimmedMessage = userMessage?.trim() ?? "";
-  const customerName = customerInfo?.name?.trim() ?? "";
-  const customerEmail = customerInfo?.email?.trim().toLowerCase() ?? "";
+  const normalizedCustomer = normalizeWidgetCustomer(customerInfo);
 
-  if (!productId || !trimmedMessage || !customerEmail || !customerName) {
+  if (!productId || !trimmedMessage || !normalizedCustomer) {
     return NextResponse.json(
-      { error: "productId, message, customer.name, and customer.email are required" },
+      { error: "productId, message, and a valid customer.externalId/customer.id or customer.email are required" },
       { status: 400, headers: CORS },
     );
   }
 
-  if (
-    trimmedMessage.length > MAX_WIDGET_MESSAGE_LENGTH ||
-    customerName.length > MAX_WIDGET_CUSTOMER_NAME_LENGTH ||
-    customerEmail.length > MAX_WIDGET_CUSTOMER_EMAIL_LENGTH
-  ) {
+  if (trimmedMessage.length > MAX_WIDGET_MESSAGE_LENGTH) {
     return NextResponse.json({ error: "Input is too long." }, { status: 400, headers: CORS });
-  }
-
-  if (!isValidCustomerEmail(customerEmail)) {
-    return NextResponse.json({ error: "Valid customer.email is required" }, { status: 400, headers: CORS });
   }
 
   // ── Product + widget config ──────────────────────────────────────────────
@@ -183,13 +143,13 @@ export async function POST(req: NextRequest) {
     };
     await requireSecurityQuota("chat.product.hour", productId, event);
     await requireSecurityQuota("chat.product.day", productId, event);
-    await requireSecurityQuota("chat.customer.hour", `${productId}:${customerEmail}`, {
+    await requireSecurityQuota("chat.customer.hour", `${productId}:${normalizedCustomer.identityKey}`, {
       ...event,
-      metadata: { customerEmail: safeQuotaKey(customerEmail) },
+      metadata: { customerIdentity: safeQuotaKey(normalizedCustomer.identityKey) },
     });
-    await requireSecurityQuota("chat.customer.day", `${productId}:${customerEmail}`, {
+    await requireSecurityQuota("chat.customer.day", `${productId}:${normalizedCustomer.identityKey}`, {
       ...event,
-      metadata: { customerEmail: safeQuotaKey(customerEmail) },
+      metadata: { customerIdentity: safeQuotaKey(normalizedCustomer.identityKey) },
     });
   } catch (error) {
     const response = quotaErrorResponse(error);
@@ -201,33 +161,19 @@ export async function POST(req: NextRequest) {
   const botName = config.botName;
 
   // ── Customer upsert ──────────────────────────────────────────────────────
-  let cust = await db.query.customer.findFirst({
-    where: and(
-      eq(customer.organizationId, foundProduct.organizationId),
-      eq(customer.email, customerEmail),
-    ),
-  });
-
   const now = new Date();
   let createdConversation = false;
-
-  if (!cust) {
-    const custId = crypto.randomUUID();
-    await db.insert(customer).values({
-      id: custId,
-      organizationId: foundProduct.organizationId,
-      name: customerName,
-      email: customerEmail,
-      createdAt: now,
-    });
-    cust = {
-      id: custId,
-      organizationId: foundProduct.organizationId,
-      name: customerName,
-      email: customerEmail,
-      createdAt: now,
-    };
+  const resolvedCustomer = await resolveWidgetCustomer({
+    organizationId: foundProduct.organizationId,
+    input: customerInfo,
+  });
+  if (!resolvedCustomer) {
+    return NextResponse.json(
+      { error: "A valid customer.externalId/customer.id or customer.email is required" },
+      { status: 400, headers: CORS },
+    );
   }
+  const cust = resolvedCustomer.customer;
 
   // ── Conversation get-or-create ───────────────────────────────────────────
   let conv = conversationId

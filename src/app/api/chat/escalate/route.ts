@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { conversation, customer, product } from "@/db/schema";
+import { conversation, product } from "@/db/schema";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import {
   isSecurityQuotaError,
@@ -10,6 +10,11 @@ import {
   safeQuotaKey,
 } from "@/lib/security";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
+import {
+  normalizeWidgetCustomer,
+  resolveWidgetCustomer,
+  type WidgetCustomerInput,
+} from "@/lib/widget-customer";
 
 // Same CORS policy as /api/chat — widget runs on any customer domain.
 const CORS: HeadersInit = {
@@ -26,7 +31,7 @@ type EscalateRequest = {
   productId: string;
   conversationId: string;
   conversationToken?: string;
-  customer: { name: string; email: string };
+  customer: WidgetCustomerInput;
 };
 
 export async function POST(req: NextRequest) {
@@ -38,11 +43,11 @@ export async function POST(req: NextRequest) {
   }
 
   const { productId, conversationId, conversationToken, customer: customerInfo } = body;
-  const customerEmail = customerInfo?.email?.trim().toLowerCase() ?? "";
+  const normalizedCustomer = normalizeWidgetCustomer(customerInfo);
 
-  if (!productId || !conversationId || !conversationToken || !customerEmail) {
+  if (!productId || !conversationId || !conversationToken || !normalizedCustomer) {
     return NextResponse.json(
-      { error: "productId, conversationId, conversationToken, and customer.email are required" },
+      { error: "productId, conversationId, conversationToken, and a valid customer.externalId/customer.id or customer.email are required" },
       { status: 400, headers: CORS },
     );
   }
@@ -61,7 +66,7 @@ export async function POST(req: NextRequest) {
       headerList: req.headers,
       path: "/api/chat/escalate",
       method: "POST",
-      metadata: { customerEmail: safeQuotaKey(customerEmail) },
+      metadata: { customerIdentity: safeQuotaKey(normalizedCustomer.identityKey) },
     });
   } catch (error) {
     if (isSecurityQuotaError(error)) {
@@ -74,15 +79,14 @@ export async function POST(req: NextRequest) {
   }
 
   // Verify the conversation belongs to this product and customer.
-  const cust = await db.query.customer.findFirst({
-    where: and(
-      eq(customer.organizationId, foundProduct.organizationId),
-      eq(customer.email, customerEmail),
-    ),
+  const resolvedCustomer = await resolveWidgetCustomer({
+    organizationId: foundProduct.organizationId,
+    input: customerInfo,
   });
-  if (!cust) {
+  if (!resolvedCustomer) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const cust = resolvedCustomer.customer;
 
   const conv = await findWidgetConversation({
     conversationId,

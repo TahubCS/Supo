@@ -329,7 +329,7 @@ export function ConversationThread({
               )}
             </div>
             <p className="text-xs text-[color:var(--text-secondary)] truncate">
-              {conversation.customer.email}
+              {conversation.customer.email ?? "No email provided"}
             </p>
           </div>
         </div>

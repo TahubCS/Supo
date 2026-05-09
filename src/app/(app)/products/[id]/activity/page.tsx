@@ -74,7 +74,7 @@ export default async function UserActivityPage({
                   </div>
                   <div className="mt-1 flex items-center gap-1.5 text-xs text-[color:var(--text-secondary)]">
                     <Mail className="size-3" />
-                    <span className="truncate">{item.customer.email}</span>
+                    <span className="truncate">{item.customer.email ?? "No email provided"}</span>
                   </div>
                 </div>
                 <time className="shrink-0 text-xs text-[color:var(--text-tertiary)]">
