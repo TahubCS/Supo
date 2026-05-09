@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
 
@@ -356,10 +356,20 @@ export const customer = pgTable("customer", {
   organizationId: text("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "cascade" }),
+  externalId: text("external_id"),
   name: text("name").notNull(),
-  email: text("email").notNull(),
+  email: text("email"),
+  avatarUrl: text("avatar_url"),
+  locale: text("locale"),
+  timezone: text("timezone"),
+  lastSeenAt: timestamp("last_seen_at"),
   createdAt: timestamp("created_at").notNull(),
-});
+  updatedAt: timestamp("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("customer_org_external_id_idx")
+    .on(table.organizationId, table.externalId)
+    .where(sql`${table.externalId} IS NOT NULL`),
+]);
 
 export const customerRelations = relations(customer, ({ one, many }) => ({
   organization: one(organization, {

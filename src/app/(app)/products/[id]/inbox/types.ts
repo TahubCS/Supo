@@ -11,7 +11,7 @@ export type ConversationWithDetails = {
   lastMessageAt: Date;
   createdAt: Date;
   updatedAt: Date;
-  customer: { id: string; name: string; email: string };
+  customer: { id: string; name: string; email: string | null };
   latestMessage: {
     id: string;
     body: string;

@@ -113,6 +113,13 @@
       "when": 1777940160000,
       "tag": "0015_widget_customization_v1",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1778026560000,
+      "tag": "0016_customer_identity_foundation",
+      "breakpoints": true
     }
   ]
 }

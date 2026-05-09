@@ -1,6 +1,11 @@
 export type SupoCustomer = {
-  name: string;
-  email: string;
+  externalId?: string;
+  id?: string;
+  name?: string;
+  email?: string;
+  avatarUrl?: string;
+  locale?: string;
+  timezone?: string;
 };
 
 export type SupoAppearance = {
