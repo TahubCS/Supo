@@ -1,6 +1,6 @@
 {
   "name": "@supoapp/widget",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "Official Supo browser widget SDK for React, vanilla TypeScript, and headless chat UI integrations.",
   "type": "module",
   "sideEffects": false,

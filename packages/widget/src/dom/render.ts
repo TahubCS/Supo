@@ -44,12 +44,14 @@ export function renderBubble({
 
 export function renderPanel({
   appearance,
+  poweredByUrl,
   customer,
   isOpen,
   messages,
   connection,
 }: {
   appearance: Required<SupoAppearance>;
+  poweredByUrl: string;
   customer: SupoCustomer | null;
   isOpen: boolean;
   messages: SupoMessage[];
@@ -60,7 +62,7 @@ export function renderPanel({
     connection,
   )}<div id="supo-beta"><strong>BETA testing:</strong> this widget is unstable at the moment.</div>${
     customer ? renderChat(appearance, messages, connection) : renderIdForm(appearance)
-  }${appearance.showPoweredBy ? '<div id="supo-powered"><a href="https://supo.app" target="_blank" rel="noopener">Powered by Supo</a></div>' : ""}</div>`;
+  }${appearance.showPoweredBy ? `<div id="supo-powered"><a href="${escapeHtml(poweredByUrl)}" target="_blank" rel="noopener">Powered by Supo</a></div>` : ""}</div>`;
 }
 
 function renderHeader(

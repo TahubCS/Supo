@@ -104,6 +104,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   function render() {
     shadow.innerHTML = `<style>${buildStyles(appearance)}</style>${renderPanel({
       appearance,
+      poweredByUrl: apiBaseUrl,
       customer,
       isOpen,
       messages,
