@@ -205,7 +205,7 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!limiters) {
-    return isProduction ? rateLimitUnavailable(path) : NextResponse.next();
+    return NextResponse.next();
   }
 
   const ip = getIp(req);
@@ -253,10 +253,9 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
         );
       }
     }
-  } catch {
-    if (isProduction) {
-      return rateLimitUnavailable(path);
-    }
+  } catch (error) {
+    console.error("[Proxy] Rate limiter check failed, failing open:", error);
+    return NextResponse.next();
   }
 
   return NextResponse.next();
