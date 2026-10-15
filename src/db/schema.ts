@@ -215,6 +215,10 @@ export const product = pgTable("product", {
   category: text("category").notNull().default("other"),
   url: text("url"),
   embeddingModel: text("embedding_model"), // locked on first index, never changed
+  // "manual" | "round_robin": how escalated conversations are assigned.
+  routingMode: text("routing_mode").notNull().default("manual"),
+  // Round-robin skips agents already handling this many active conversations.
+  maxConcurrentChats: integer("max_concurrent_chats").notNull().default(5),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
@@ -440,6 +444,13 @@ export const conversation = pgTable(
     snoozedUntil: timestamp("snoozed_until"),
     resolvedAt: timestamp("resolved_at"),
     resolvedById: text("resolved_by_id").references(() => user.id, { onDelete: "set null" }),
+    // "low" | "normal" | "high" | "urgent"
+    priority: text("priority").notNull().default("normal"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    // "widget" | "email" | "api"
+    channel: text("channel").notNull().default("widget"),
+    // First human reply after the conversation was handed off (SLA tracking).
+    firstResponseAt: timestamp("first_response_at"),
     publicAccessToken: text("public_access_token").notNull(),
     subject: text("subject"),
     lastMessageAt: timestamp("last_message_at").notNull(),
@@ -633,4 +644,55 @@ export const backgroundJob = pgTable(
       .on(table.dedupeKey)
       .where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} IN ('queued', 'running')`),
   ],
+);
+
+// Canned responses ("macros") agents insert with "/" in the composer. Optional
+// actions run when the macro is applied (set priority, add tags, resolve).
+export type MacroActions = {
+  status?: "resolved" | "snoozed";
+  priority?: "low" | "normal" | "high" | "urgent";
+  addTags?: string[];
+};
+
+export const macro = pgTable(
+  "macro",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    shortcut: text("shortcut"),
+    body: text("body").notNull(),
+    actions: jsonb("actions").$type<MacroActions>(),
+    usageCount: integer("usage_count").notNull().default(0),
+    createdById: text("created_by_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("macro_product_idx").on(table.productId),
+    uniqueIndex("macro_product_shortcut_idx")
+      .on(table.productId, table.shortcut)
+      .where(sql`${table.shortcut} IS NOT NULL`),
+  ],
+);
+
+// Tenant-visible audit trail of changes inside a product.
+export const productAuditLog = pgTable(
+  "product_audit_log",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+    actorName: text("actor_name"),
+    action: text("action").notNull(),
+    targetType: text("target_type"),
+    targetId: text("target_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("product_audit_log_product_created_idx").on(table.productId, table.createdAt)],
 );

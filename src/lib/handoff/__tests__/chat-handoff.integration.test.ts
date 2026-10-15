@@ -11,6 +11,7 @@ const DATABASE_URL = process.env.TEST_DATABASE_URL;
 const published: { channel: string; event: string; data: Record<string, unknown> }[] = [];
 const enqueued: { type: string; payload: Record<string, unknown> }[] = [];
 let onlineAgents: number | null = 1;
+let onlineAgentIds: string[] = [];
 
 vi.mock("next/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/server")>();
@@ -24,6 +25,7 @@ vi.mock("@/lib/ably", () => ({
     published.push({ channel: "inbox", event, data });
   },
   getOnlineAgentCount: async () => onlineAgents,
+  getOnlineAgentUserIds: async () => onlineAgentIds,
 }));
 vi.mock("@/lib/jobs/queue", () => ({
   enqueueAndKick: async (type: string, payload: Record<string, unknown>) => {
@@ -178,5 +180,51 @@ describe.skipIf(!DATABASE_URL)("chat handoff flow (database)", () => {
     // Same email, no token: an unverified widget session gets a NEW conversation.
     const intruder = await send("show me the previous chat");
     expect(intruder.ref.id).not.toBe(start.ref.id);
+  });
+
+  it("round-robin assigns the least busy online agent", async () => {
+    const { eq } = await import("drizzle-orm");
+    const now = new Date();
+    const busy = `user_${crypto.randomUUID()}`;
+    const free = `user_${crypto.randomUUID()}`;
+    await dbm.db.insert(schema.user).values([
+      { id: busy, name: "Busy Bee", email: `${busy}@example.com`, emailVerified: true, createdAt: now, updatedAt: now },
+      { id: free, name: "Free Agent", email: `${free}@example.com`, emailVerified: true, createdAt: now, updatedAt: now },
+    ]);
+    await dbm.db.update(schema.product).set({ routingMode: "round_robin", maxConcurrentChats: 2 }).where(eq(schema.product.id, productId));
+
+    // Give "busy" an active conversation already.
+    customer.email = "rr-existing@example.com";
+    const existing = await send("talk to a human");
+    await dbm.db
+      .update(schema.conversation)
+      .set({ assigneeId: busy, escalationStatus: "active" })
+      .where(eq(schema.conversation.id, existing.ref.id!));
+
+    onlineAgentIds = [busy, free];
+    customer.email = "rr-new@example.com";
+    const res = await send("I need to speak to a person");
+    expect(res.res.headers.get("x-escalation-status")).toBe("active");
+    const conv = await dbm.db.query.conversation.findFirst({ where: eq(schema.conversation.id, res.ref.id!) });
+    expect(conv?.assigneeId).toBe(free);
+    const history = await pollAll(res.ref);
+    expect(history.messages.some((m) => m.senderType === "system" && m.body.includes("Free Agent joined"))).toBe(true);
+
+    onlineAgentIds = [];
+    await dbm.db.update(schema.product).set({ routingMode: "manual" }).where(eq(schema.product.id, productId));
+  });
+
+  it("never exposes internal notes to the widget", async () => {
+    customer.email = "notes@example.com";
+    const start = await send("hello there, quick question about invoices");
+    await dbm.db.insert(schema.message).values({
+      id: crypto.randomUUID(),
+      conversationId: start.ref.id!,
+      body: "SECRET internal note",
+      senderType: "note",
+      createdAt: new Date(),
+    });
+    const history = await pollAll(start.ref);
+    expect(history.messages.some((m) => m.body.includes("SECRET"))).toBe(false);
   });
 });

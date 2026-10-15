@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
 import { member, productInvitation, productMember, user } from "@/db/schema";
+import { recordProductAudit } from "@/lib/audit";
 import {
   isProductRole,
   isWorkspaceOwnerRole,
@@ -90,6 +91,14 @@ export async function assignProductRole(
     role,
   });
 
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: kind === "assigned" ? "team.role_assigned" : "team.invited",
+    targetType: "user",
+    targetId: targetUser?.id ?? email,
+    metadata: { email, role },
+  });
   revalidatePath(`/products/${productId}/team`);
   return { kind, email: emailResult };
 }
@@ -141,6 +150,13 @@ export async function removeProductMember(
     .delete(productMember)
     .where(and(eq(productMember.productId, productId), eq(productMember.userId, userId)));
 
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "team.member_removed",
+    targetType: "user",
+    targetId: userId,
+  });
   revalidatePath(`/products/${productId}/team`);
 }
 
@@ -166,6 +182,14 @@ export async function updateProductMemberRole(
     .set({ role, updatedAt: now })
     .where(and(eq(productMember.productId, productId), eq(productMember.userId, userId)));
 
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "team.role_changed",
+    targetType: "user",
+    targetId: userId,
+    metadata: { from: existing.role, to: role },
+  });
   revalidatePath(`/products/${productId}/team`);
 }
 

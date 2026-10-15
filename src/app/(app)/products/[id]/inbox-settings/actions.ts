@@ -1,0 +1,137 @@
+"use server";
+
+import { and, eq } from "drizzle-orm";
+
+import { db } from "@/db";
+import { macro, product, type MacroActions } from "@/db/schema";
+import { recordProductAudit } from "@/lib/audit";
+import { requireProductAccess } from "@/lib/product-access";
+
+export type MacroInput = {
+  title: string;
+  shortcut?: string | null;
+  body: string;
+  actions?: MacroActions | null;
+};
+
+function normalizeMacro(input: MacroInput) {
+  const title = input.title?.trim().slice(0, 80) ?? "";
+  const body = input.body?.trim().slice(0, 5000) ?? "";
+  const shortcut =
+    input.shortcut
+      ?.trim()
+      .toLowerCase()
+      .replace(/^\/+/, "")
+      .replace(/[^a-z0-9_-]/g, "")
+      .slice(0, 32) || null;
+  if (!title) throw new Error("Title is required");
+  if (!body) throw new Error("Reply text is required");
+
+  const actions: MacroActions = {};
+  if (input.actions?.status === "resolved") actions.status = "resolved";
+  if (input.actions?.priority && ["low", "normal", "high", "urgent"].includes(input.actions.priority)) {
+    actions.priority = input.actions.priority;
+  }
+  const tags = (input.actions?.addTags ?? [])
+    .map((tag) => tag.trim().toLowerCase().replace(/\s+/g, "-"))
+    .filter(Boolean)
+    .slice(0, 5);
+  if (tags.length) actions.addTags = tags;
+
+  return { title, body, shortcut, actions: Object.keys(actions).length ? actions : null };
+}
+
+async function requireSettings(productId: string) {
+  return requireProductAccess(productId, ["inboxSettings"]);
+}
+
+function friendlyUniqueError(error: unknown): never {
+  if (error instanceof Error && /macro_product_shortcut_idx|duplicate key/i.test(error.message)) {
+    throw new Error("Another macro already uses that shortcut");
+  }
+  throw error;
+}
+
+export async function createMacro(productId: string, input: MacroInput): Promise<string> {
+  const access = await requireSettings(productId);
+  const values = normalizeMacro(input);
+  const id = crypto.randomUUID();
+  const now = new Date();
+  try {
+    await db.insert(macro).values({
+      id,
+      productId,
+      ...values,
+      createdById: access.session.user.id,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (error) {
+    friendlyUniqueError(error);
+  }
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "macro.created",
+    targetType: "macro",
+    targetId: id,
+    metadata: { title: values.title },
+  });
+  return id;
+}
+
+export async function updateMacro(macroId: string, input: MacroInput): Promise<void> {
+  const existing = await db.query.macro.findFirst({ where: eq(macro.id, macroId) });
+  if (!existing) throw new Error("Not found");
+  const access = await requireSettings(existing.productId);
+  const values = normalizeMacro(input);
+  try {
+    await db
+      .update(macro)
+      .set({ ...values, updatedAt: new Date() })
+      .where(and(eq(macro.id, macroId), eq(macro.productId, existing.productId)));
+  } catch (error) {
+    friendlyUniqueError(error);
+  }
+  await recordProductAudit({
+    productId: existing.productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "macro.updated",
+    targetType: "macro",
+    targetId: macroId,
+    metadata: { title: values.title },
+  });
+}
+
+export async function deleteMacro(macroId: string): Promise<void> {
+  const existing = await db.query.macro.findFirst({ where: eq(macro.id, macroId) });
+  if (!existing) return;
+  const access = await requireSettings(existing.productId);
+  await db.delete(macro).where(eq(macro.id, macroId));
+  await recordProductAudit({
+    productId: existing.productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "macro.deleted",
+    targetType: "macro",
+    targetId: macroId,
+    metadata: { title: existing.title },
+  });
+}
+
+export async function saveRoutingSettings(
+  productId: string,
+  input: { routingMode: "manual" | "round_robin"; maxConcurrentChats: number },
+): Promise<void> {
+  const access = await requireSettings(productId);
+  const routingMode = input.routingMode === "round_robin" ? "round_robin" : "manual";
+  const maxConcurrentChats = Math.max(1, Math.min(50, Math.round(Number(input.maxConcurrentChats) || 5)));
+  await db.update(product).set({ routingMode, maxConcurrentChats, updatedAt: new Date() }).where(eq(product.id, productId));
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "routing.updated",
+    targetType: "product",
+    targetId: productId,
+    metadata: { routingMode, maxConcurrentChats },
+  });
+}
