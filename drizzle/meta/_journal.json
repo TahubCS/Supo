@@ -183,6 +183,13 @@
       "when": 1778631480000,
       "tag": "0025_api_keys_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1778631540000,
+      "tag": "0026_email_channel_retention",
+      "breakpoints": true
     }
   ]
 }

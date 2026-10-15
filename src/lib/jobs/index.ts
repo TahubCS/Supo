@@ -7,6 +7,8 @@ import { ingestSource, syncSourceIfChanged } from "@/lib/knowledge/ingest";
 import "@/lib/handoff/jobs";
 import "@/lib/sla/jobs";
 import "@/lib/webhooks/jobs";
+import "@/lib/email-channel/jobs";
+import "@/lib/privacy/jobs";
 
 import { enqueueAndKick, registerJobHandler } from "./queue";
 

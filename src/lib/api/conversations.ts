@@ -4,6 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { conversation, message } from "@/db/schema";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
+import { queueEmailReplyIfNeeded } from "@/lib/email-channel/service";
 import { postSystemMessage } from "@/lib/handoff/service";
 import { applySlaTargets } from "@/lib/sla/service";
 import { conversationData, emitConversationEvent, emitWebhookEvent, messageData } from "@/lib/webhooks/service";
@@ -163,5 +164,6 @@ export async function postMessageFromApi(ctx: ApiContext, conv: ApiConversation,
     "message.created",
     messageData({ id, conversationId: conv.id, senderType: "agent", body, createdAt: now }),
   );
+  await queueEmailReplyIfNeeded(conv, id);
   return { id, seq: saved.seq, createdAt: now };
 }

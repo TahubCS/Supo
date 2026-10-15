@@ -5,6 +5,8 @@ import { customer } from "@/db/schema";
 import { authenticateApi, isApiContext } from "@/lib/api/auth";
 import { findCustomer, parseCustomerFields, serializeCustomer } from "@/lib/api/customers";
 import { ApiInputError, handleApiErrors, notFound, readJsonObject } from "@/lib/api/http";
+import { recordProductAudit } from "@/lib/audit";
+import { eraseCustomer } from "@/lib/privacy/service";
 
 type Params = { params: Promise<{ customerId: string }> };
 
@@ -42,4 +44,25 @@ export async function PATCH(req: Request, { params }: Params) {
   } catch (error) {
     return handleApiErrors(error);
   }
+}
+
+/**
+ * DELETE /api/v1/customers/{id} — erases the customer and all of their
+ * conversations in the workspace (GDPR right to erasure). Irreversible.
+ */
+export async function DELETE(req: Request, { params }: Params) {
+  const ctx = await authenticateApi(req, "customers:write");
+  if (!isApiContext(ctx)) return ctx;
+  const customerId = (await params).customerId;
+  const result = await eraseCustomer(ctx.organizationId, customerId);
+  if (!result) return notFound("Customer");
+  await recordProductAudit({
+    productId: ctx.productId,
+    actor: null,
+    action: "customer.erased",
+    targetType: "customer",
+    targetId: customerId,
+    metadata: { via: "api", apiKeyId: ctx.keyId, conversations: result.conversations },
+  });
+  return new Response(null, { status: 204 });
 }

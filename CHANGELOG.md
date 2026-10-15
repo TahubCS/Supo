@@ -15,6 +15,26 @@ All notable changes to Supo will be documented in this file.
 - **Inbox:** bulk resolve keeps selection changes made while the request was running.
 - **Widget SDK `0.1.0-alpha.10`:** message events fire after the widget has updated.
 
+### Email channel and privacy
+
+- **Email channel:**
+  - per-product inbound address (`INBOUND_EMAIL_DOMAIN`)
+  - the Resend `email.received` webhook is signature-verified (`RESEND_WEBHOOK_SECRET`) and processed by a job
+  - quoted replies and signatures are stripped
+  - threading via our Message-IDs, the customer's References, or sender + subject
+  - provider retries are de-duplicated
+  - auto-replies, bounces and loops are ignored
+  - new emails go to the team queue with SLAs and routing
+  - agent replies (dashboard or API) are sent by email in the same thread
+  - the inbox shows an Email badge
+- **GDPR:**
+  - customer data export (JSON) and erasure, from the inbox sidebar (product admins) and the API (`/customers/{id}/export`, `DELETE /customers/{id}`)
+  - erasure covers every product in the workspace and webhook logs
+- **Data retention:**
+  - per-product automatic deletion of resolved conversations older than N days, plus orphaned customers
+  - webhook delivery logs are kept for 30 days
+- Migration `0026_email_channel_retention` adds `email_channel`, `message.email_message_id` and `product.data_retention_days`.
+
 ### API and webhooks
 
 - **REST API v1** (`/api/v1`): conversations (list with cursor pagination, get, update status/priority/tags), messages (list, post replies or internal notes), customers (list, upsert, update), knowledge sources (list, add, re-index, delete) and search (with optional AI answer), and help center articles (CRUD and publish). See `docs/API.md`.

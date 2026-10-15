@@ -19,6 +19,7 @@ import {
 import { recordProductAudit } from "@/lib/audit";
 import { normalizeTags, PRIORITIES, type ConversationPriority } from "@/lib/conversations/fields";
 import { getConversationRating } from "@/lib/csat/service";
+import { queueEmailReplyIfNeeded } from "@/lib/email-channel/service";
 import { emitConversationEvent, emitWebhookEvent, messageData } from "@/lib/webhooks/service";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import { postSystemMessage, HANDOFF_JOB_TYPES } from "@/lib/handoff/service";
@@ -591,9 +592,11 @@ export async function sendMessage(conversationId: string, rawBody: string): Prom
     messageData({ id, conversationId, senderType: "agent", senderId: userId, body, createdAt: saved.createdAt }),
   );
 
-  // Email the reply if the customer has left the widget.
-  const lastSeen = conv.customerLastSeenAt?.getTime() ?? 0;
-  if (Date.now() - lastSeen > 2 * 60 * 1000) {
+  if (conv.channel === "email") {
+    // Email conversations: the reply itself is sent as an email.
+    await queueEmailReplyIfNeeded(conv, id);
+  } else if (Date.now() - (conv.customerLastSeenAt?.getTime() ?? 0) > 2 * 60 * 1000) {
+    // Email the reply if the customer has left the widget.
     after(() =>
       enqueueAndKick(HANDOFF_JOB_TYPES.notifyCustomer, { conversationId }, {
         dedupeKey: `${HANDOFF_JOB_TYPES.notifyCustomer}:${conversationId}`,

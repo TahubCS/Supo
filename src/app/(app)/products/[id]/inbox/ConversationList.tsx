@@ -1,7 +1,7 @@
 "use client";
 
 import { format, formatDistanceToNow, isToday } from "date-fns";
-import { CheckSquare, MessageSquare, Search, Square } from "lucide-react";
+import { CheckSquare, Mail, MessageSquare, Search, Square } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -138,6 +138,11 @@ function ConversationItem({
             {!conv.escalationStatus && conv.aiHandled && (
               <span className="rounded-full border border-border px-1.5 py-px text-[10px] text-[color:var(--text-tertiary)]">
                 AI
+              </span>
+            )}
+            {conv.channel === "email" && (
+              <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border px-1.5 py-px text-[10px] text-[color:var(--text-secondary)]">
+                <Mail className="size-2.5" /> Email
               </span>
             )}
             <SlaBadge conv={conv} now={now} />
