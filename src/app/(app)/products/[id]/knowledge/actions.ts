@@ -10,6 +10,7 @@ import { geminiGenerate } from "@/lib/knowledge/ai";
 import { DEFAULT_MAX_PAGES, MAX_PAGES_LIMIT } from "@/lib/knowledge/ingest";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
 import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
+import { recordProductAudit } from "@/lib/audit";
 import { requireProductAccess } from "@/lib/product-access";
 import { requireSecurityQuota } from "@/lib/security";
 
@@ -93,6 +94,23 @@ async function requireSourceQuota(productId: string, path: string) {
   await requireSecurityQuota("knowledge.source.organization.day", membership.organizationId, event);
 }
 
+async function auditKnowledge(
+  productId: string,
+  action: string,
+  targetId: string,
+  metadata?: Record<string, unknown>,
+) {
+  const access = await verifyProductAccess(productId);
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action,
+    targetType: "knowledge_source",
+    targetId,
+    metadata,
+  });
+}
+
 async function verifySourceAccess(sourceId: string) {
   const source = await db.query.knowledgeSource.findFirst({
     where: eq(knowledgeSource.id, sourceId),
@@ -125,6 +143,7 @@ export async function addSource(productId: string, input: AddSourceInput): Promi
   });
 
   await queueSourceIndexing(sourceId);
+  await auditKnowledge(productId, "knowledge.source_added", sourceId, { type: input.type, name: values.name });
   return sourceId;
 }
 
@@ -166,19 +185,24 @@ export async function updateSource(sourceId: string, input: UpdateSourceInput): 
     await requireSourceQuota(source.productId, "/knowledge/update-source");
     await queueSourceIndexing(sourceId);
   }
+  await auditKnowledge(source.productId, "knowledge.source_updated", sourceId, { name: values.name, contentChanged });
 }
 
 export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
-  await verifySourceAccess(sourceId);
+  const source = await verifySourceAccess(sourceId);
   await db
     .update(knowledgeSource)
     .set({ enabled, updatedAt: new Date() })
     .where(eq(knowledgeSource.id, sourceId));
+  await auditKnowledge(source.productId, enabled ? "knowledge.source_enabled" : "knowledge.source_disabled", sourceId, {
+    name: source.name,
+  });
 }
 
 export async function deleteSource(sourceId: string): Promise<void> {
-  await verifySourceAccess(sourceId);
+  const source = await verifySourceAccess(sourceId);
   await db.delete(knowledgeSource).where(eq(knowledgeSource.id, sourceId));
+  await auditKnowledge(source.productId, "knowledge.source_deleted", sourceId, { name: source.name, type: source.type });
 }
 
 export async function reindexSource(sourceId: string): Promise<void> {

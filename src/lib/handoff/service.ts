@@ -1,11 +1,17 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { conversation, message } from "@/db/schema";
-import { getOnlineAgentCount, publishToConversation, publishToProductInbox } from "@/lib/ably";
+import { conversation, message, product, user } from "@/db/schema";
+import {
+  getOnlineAgentCount,
+  getOnlineAgentUserIds,
+  publishToConversation,
+  publishToProductInbox,
+} from "@/lib/ably";
 import { enqueueAndKick } from "@/lib/jobs/queue";
 
 import { HANDOFF_REASON_LABELS } from "./policy";
+import { pickRoundRobinAgent } from "./routing";
 
 export type AgentAvailability = "online" | "offline" | "unknown";
 
@@ -56,6 +62,53 @@ function handoffNotice(availability: AgentAvailability, followUpEmail: string | 
       : "Our team isn't online right now. Leave your email below and we'll follow up as soon as possible.";
   }
   return "I've asked a member of our support team to join. You can keep chatting with me while you wait.";
+}
+
+/**
+ * Round-robin routing: assigns a freshly escalated conversation to the least
+ * busy online agent. Returns the assignee or null when routing is manual or
+ * nobody is available.
+ */
+async function autoAssign(
+  orgId: string,
+  productId: string,
+  conversationId: string,
+): Promise<{ id: string; name: string } | null> {
+  const settings = await db.query.product.findFirst({
+    where: eq(product.id, productId),
+    columns: { routingMode: true, maxConcurrentChats: true },
+  });
+  if (settings?.routingMode !== "round_robin") return null;
+
+  const online = await getOnlineAgentUserIds(orgId, productId);
+  if (!online || online.length === 0) return null;
+
+  const loads = await db
+    .select({ assigneeId: conversation.assigneeId, count: sql<number>`count(*)::int` })
+    .from(conversation)
+    .where(
+      and(
+        eq(conversation.productId, productId),
+        eq(conversation.escalationStatus, "active"),
+        inArray(conversation.assigneeId, online),
+      ),
+    )
+    .groupBy(conversation.assigneeId);
+  const counts = Object.fromEntries(loads.map((row) => [row.assigneeId ?? "", Number(row.count)]));
+  // Shuffle so equally loaded agents share the work.
+  const shuffled = [...online].sort(() => Math.random() - 0.5);
+  const chosen = pickRoundRobinAgent(shuffled, counts, settings.maxConcurrentChats);
+  if (!chosen) return null;
+
+  const assigned = await db
+    .update(conversation)
+    .set({ assigneeId: chosen, escalationStatus: "active", updatedAt: new Date() })
+    .where(and(eq(conversation.id, conversationId), isNull(conversation.assigneeId)))
+    .returning({ id: conversation.id });
+  if (assigned.length === 0) return null;
+
+  const agent = await db.query.user.findFirst({ where: eq(user.id, chosen), columns: { id: true, name: true } });
+  return agent ?? { id: chosen, name: "A teammate" };
 }
 
 export type EscalationResult = {
@@ -129,6 +182,37 @@ export async function escalateConversation({
   const needsEmail = availability === "offline" && !followUpEmail;
 
   await postSystemMessage({ orgId, productId, conversationId, body: handoffNotice(availability, followUpEmail) });
+
+  const assignee = availability === "online" ? await autoAssign(orgId, productId, conversationId) : null;
+  if (assignee) {
+    await postSystemMessage({ orgId, productId, conversationId, body: `${assignee.name} joined the conversation.` });
+    await Promise.allSettled([
+      publishToConversation(orgId, productId, conversationId, "escalation_update", {
+        status: "active",
+        agentName: assignee.name,
+      }),
+      publishToProductInbox(orgId, productId, "conversation_assigned", {
+        conversationId,
+        assigneeId: assignee.id,
+        subject,
+        customerName,
+      }),
+      publishToProductInbox(orgId, productId, "conversation_updated", {
+        conversationId,
+        status: "open",
+        escalationStatus: "active",
+        handoffReason: reason,
+        assigneeId: assignee.id,
+        aiHandled: false,
+        escalatedAt: now.toISOString(),
+      }),
+      enqueueAndKick(HANDOFF_JOB_TYPES.summarize, { conversationId }, {
+        dedupeKey: `${HANDOFF_JOB_TYPES.summarize}:${conversationId}`,
+        maxAttempts: 2,
+      }),
+    ]);
+    return { escalated: true, escalationStatus: "active", availability, needsEmail: false };
+  }
 
   await Promise.allSettled([
     publishToConversation(orgId, productId, conversationId, "escalation_update", {

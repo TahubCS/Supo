@@ -25,6 +25,10 @@ export type ConversationWithDetails = {
   followUpEmail: string | null;
   identityVerified: boolean;
   snoozedUntil: Date | null;
+  priority: string;
+  tags: string[];
+  channel: string;
+  firstResponseAt: Date | null;
   subject: string | null;
   lastMessageAt: Date;
   createdAt: Date;

@@ -78,6 +78,28 @@ export async function getOnlineAgentCount(orgId: string, productId: string): Pro
   }
 }
 
+// User ids of agents present in the inbox (clientId is "agent:<userId>").
+export async function getOnlineAgentUserIds(orgId: string, productId: string): Promise<string[] | null> {
+  const rest = getRestClient();
+  if (!rest) return null;
+  try {
+    const result = (await rest.channels
+      .get(presenceChannelName(orgId, productId))
+      .presence.get()) as PresenceGetResult;
+    const members = Array.isArray(result) ? result : (result?.items ?? []);
+    return [
+      ...new Set(
+        members
+          .map((member) => member.clientId ?? "")
+          .filter((clientId) => clientId.startsWith("agent:"))
+          .map((clientId) => clientId.slice("agent:".length)),
+      ),
+    ];
+  } catch {
+    return null;
+  }
+}
+
 // Kept for the public presence endpoint used by older widget builds.
 export async function getPresenceCount(orgId: string, productId: string): Promise<number> {
   return (await getOnlineAgentCount(orgId, productId)) ?? 0;

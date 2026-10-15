@@ -4,6 +4,18 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Agent workspace
+
+- **Internal notes:** an amber "Internal note" composer mode. Notes travel on the agents-only inbox channel and are never sent to the widget, returned by polling or shown to the AI.
+- **Macros (canned responses):** type `/` in the reply box. Supports variables (`{{customer.first_name}}`, `{{agent.name}}`, …) and actions (set priority, add tags, resolve after sending). They are managed under the new **Inbox settings** page, with usage counts.
+- **Draft with AI:** drafts the next reply from the knowledge base and the conversation, in the agent's voice. The handoff summary can be regenerated.
+- **Priority and tags** per conversation, shown in the list. A customer sidebar shows the profile, identity verification status and previous conversations.
+- **Search:** full-text search over message bodies (GIN index), plus customers, subjects and tags. Bulk resolve, and `j`/`k` keyboard navigation.
+- **Round-robin routing** (Inbox settings): escalations are assigned automatically to the least-busy online agent, under a per-agent active-chat cap. The assignee gets a browser notification.
+- **First response time** is recorded on the first human reply (used for SLAs).
+- **Product audit log:** conversation assignment, transfer, resolve and priority changes; knowledge source changes; widget, origin, handoff and identity-secret changes; team role changes; macros; routing. Admins and developers can view it on the Activity page.
+- Migration `0021_agent_workspace`.
+
 ### Human handoff (fixed and rebuilt)
 
 - **No more accidental lock-outs:** the AI used to escalate whenever the knowledge base had no match (even for "hi"). It then stopped answering for good, and the widget disabled the input until an agent joined, which might be never.

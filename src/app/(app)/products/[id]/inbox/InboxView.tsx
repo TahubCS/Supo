@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import type { ProductRole } from "@/lib/product-access";
 import { inboxChannelName, presenceChannelName } from "@/lib/realtime-channels";
 
-import { getConversationForInbox, type Teammate } from "./actions";
+import { getConversationForInbox, listMacros, type MacroSummary, type Teammate } from "./actions";
 import { closeAblyClient, createAgentAuthCallback, ignoreExpectedAblyTeardown } from "./ably-client";
 import { ConversationList } from "./ConversationList";
 import { ConversationThread } from "./ConversationThread";
@@ -40,6 +40,8 @@ type ConversationPatch = Partial<Omit<ConversationWithDetails, "lastMessageAt" |
 };
 
 const PATCHABLE_FIELDS = [
+  "priority",
+  "tags",
   "status",
   "escalationStatus",
   "assigneeId",
@@ -85,6 +87,11 @@ export function InboxView({
 }) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
+  const [macros, setMacros] = useState<MacroSummary[]>([]);
+
+  useEffect(() => {
+    listMacros(productId).then(setMacros).catch(() => {});
+  }, [productId]);
 
   // One realtime connection for the whole inbox, shared with the open thread.
   // Created lazily on the client (never during SSR) and connected in an effect.
@@ -200,6 +207,27 @@ export function InboxView({
       }),
     ).catch(ignoreExpectedAblyTeardown);
 
+    const assignedSub = Promise.resolve(
+      inboxCh.subscribe("conversation_assigned", (msg) => {
+        if (cancelled) return;
+        const d = msg.data as { conversationId: string; assigneeId: string; customerName?: string; subject?: string | null };
+        patchConversation(d.conversationId, { assigneeId: d.assigneeId, escalationStatus: "active" });
+        void ensureConversation(d.conversationId);
+        if (d.assigneeId !== currentUserId) return;
+        if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+          const notification = new Notification(`New conversation assigned: ${d.customerName ?? "customer"}`, {
+            body: d.subject ?? undefined,
+            tag: `supo-${d.conversationId}`,
+          });
+          notification.onclick = () => {
+            window.focus();
+            setSelectedId(d.conversationId);
+          };
+        }
+        playNotificationSound();
+      }),
+    ).catch(ignoreExpectedAblyTeardown);
+
     const newConversationSub = Promise.resolve(
       inboxCh.subscribe("new_conversation", (msg) => {
         if (cancelled) return;
@@ -218,12 +246,12 @@ export function InboxView({
       } catch {
         // Channel may already be detached during Fast Refresh.
       }
-      void Promise.allSettled([presenceEnter, needsAgentSub, updatedSub, newConversationSub])
+      void Promise.allSettled([presenceEnter, needsAgentSub, updatedSub, assignedSub, newConversationSub])
         .then(() => presenceCh.presence.leave())
         .catch(ignoreExpectedAblyTeardown)
         .finally(() => closeAblyClient(ablyClient));
     };
-  }, [ablyClient, ensureConversation, orgId, patchConversation, productId, userName]);
+  }, [ablyClient, currentUserId, ensureConversation, orgId, patchConversation, productId, userName]);
 
   // Without realtime, keep the list reasonably fresh by polling the server.
   useEffect(() => {
@@ -231,6 +259,8 @@ export function InboxView({
     const timer = setInterval(() => router.refresh(), FALLBACK_REFRESH_MS);
     return () => clearInterval(timer);
   }, [ablyClient, router]);
+
+  const loadConversation = useCallback((id: string) => void ensureConversation(id), [ensureConversation]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId) ?? null;
 
@@ -241,6 +271,13 @@ export function InboxView({
         selectedId={selectedId}
         onSelect={setSelectedId}
         currentUserId={currentUserId}
+        productId={productId}
+        onLoadConversation={loadConversation}
+        onResolved={(ids) =>
+          ids.forEach((id) =>
+            patchConversation(id, { status: "resolved", escalationStatus: null, assigneeId: null, aiHandled: true }),
+          )
+        }
       />
       <ConversationThread
         key={selectedConversation?.id ?? "none"}
@@ -250,8 +287,13 @@ export function InboxView({
         currentUserId={currentUserId}
         productRole={productRole}
         teammates={teammates}
+        macros={macros}
         ablyClient={ablyClient}
         onConversationChange={(patch) => selectedConversation && patchConversation(selectedConversation.id, patch)}
+        onSelectConversation={(id) => {
+          setSelectedId(id);
+          void ensureConversation(id);
+        }}
       />
     </div>
   );

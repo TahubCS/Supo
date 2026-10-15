@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { decideHandoff, detectFrustration, detectHumanRequest } from "@/lib/handoff/policy";
+import { pickRoundRobinAgent } from "@/lib/handoff/routing";
 
 describe("detectHumanRequest", () => {
   it.each([
@@ -70,5 +71,13 @@ describe("decideHandoff", () => {
   it("escalates immediately on explicit requests and frustration", () => {
     expect(decideHandoff({ ...base, message: "let me talk to a human" }).reason).toBe("customer_request");
     expect(decideHandoff({ ...base, message: "this is ridiculous" }).reason).toBe("frustration");
+  });
+});
+
+describe("pickRoundRobinAgent", () => {
+  it("picks the least loaded agent under the cap", () => {
+    expect(pickRoundRobinAgent(["a", "b", "c"], { a: 2, b: 0, c: 1 }, 5)).toBe("b");
+    expect(pickRoundRobinAgent(["a", "b"], { a: 5, b: 5 }, 5)).toBeNull();
+    expect(pickRoundRobinAgent(["a", "b"], {}, 3)).toBe("a");
   });
 });

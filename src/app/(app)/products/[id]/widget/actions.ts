@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { widgetConfig } from "@/db/schema";
+import { recordProductAudit } from "@/lib/audit";
 import { requireProductAccess } from "@/lib/product-access";
 import { normalizeWidgetConfig, type WidgetConfigValues } from "@/lib/widget-config";
 import { parseAllowedOrigins } from "@/lib/widget-cors";
@@ -12,6 +13,18 @@ import {
   normalizeIdentityMode,
   type IdentityVerificationMode,
 } from "@/lib/widget-identity";
+
+async function auditWidget(productId: string, action: string, metadata?: Record<string, unknown>) {
+  const access = await requireProductAccess(productId, ["widget"]);
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action,
+    targetType: "widget",
+    targetId: productId,
+    metadata,
+  });
+}
 
 export async function saveWidgetConfig(
   productId: string,
@@ -64,6 +77,7 @@ export async function saveWidgetConfig(
         updatedAt: now,
       },
     });
+  await auditWidget(productId, "widget.appearance_updated");
 }
 
 export type SaveAllowedOriginsResult =
@@ -96,6 +110,7 @@ export async function saveWidgetAllowedOrigins(
       set: { allowedOrigins: origins, updatedAt: now },
     });
 
+  await auditWidget(productId, "widget.allowed_origins_updated", { origins });
   return { ok: true, origins };
 }
 
@@ -138,6 +153,7 @@ export async function saveWidgetHandoffSettings(
       target: widgetConfig.productId,
       set: { handoffTimeoutSec, identityVerification: mode, updatedAt: now },
     });
+  await auditWidget(productId, "widget.handoff_settings_updated", { handoffTimeoutSec, identityVerification: mode });
   return { ok: true };
 }
 
@@ -153,5 +169,6 @@ export async function rotateIdentitySecret(productId: string): Promise<string> {
       target: widgetConfig.productId,
       set: { identitySecret: secret, updatedAt: now },
     });
+  await auditWidget(productId, "widget.identity_secret_rotated");
   return secret;
 }
