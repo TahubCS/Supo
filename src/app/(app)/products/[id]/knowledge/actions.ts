@@ -77,7 +77,7 @@ export async function addSource(productId: string, input: AddSourceInput): Promi
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": env.BETTER_AUTH_API_KEY,
+      Authorization: `Bearer ${env.CRON_SECRET ?? ""}`,
     },
     body: JSON.stringify({ sourceId, productId }),
   }).catch(() => {
@@ -141,7 +141,7 @@ export async function reindexSource(sourceId: string): Promise<void> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": env.BETTER_AUTH_API_KEY,
+      Authorization: `Bearer ${env.CRON_SECRET ?? ""}`,
     },
     body: JSON.stringify({ sourceId, productId: source.product.id }),
   }).catch(() => {});
@@ -194,7 +194,7 @@ export async function approveSuggestion(suggestionId: string): Promise<void> {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": env.BETTER_AUTH_API_KEY,
+      Authorization: `Bearer ${env.CRON_SECRET ?? ""}`,
     },
     body: JSON.stringify({ sourceId, productId: suggestion.productId }),
   }).catch(() => {});

@@ -13,19 +13,59 @@ function optionalEnv(name: string) {
   return value || undefined;
 }
 
+// Values are read lazily so that importing a module never throws at build time
+// (CI, `next build`, unit tests). A missing required variable still fails loudly
+// the first time code actually needs it.
 export const env = {
-  DATABASE_URL: requireEnv("DATABASE_URL"),
-  BETTER_AUTH_API_KEY: requireEnv("BETTER_AUTH_API_KEY"),
-  BETTER_AUTH_SECRET: requireEnv("BETTER_AUTH_SECRET"),
-  BETTER_AUTH_URL: requireEnv("BETTER_AUTH_URL"),
-  GOOGLE_CLIENT_ID: requireEnv("GOOGLE_CLIENT_ID"),
-  GOOGLE_CLIENT_SECRET: requireEnv("GOOGLE_CLIENT_SECRET"),
-  GITHUB_CLIENT_ID: requireEnv("GITHUB_CLIENT_ID"),
-  GITHUB_CLIENT_SECRET: requireEnv("GITHUB_CLIENT_SECRET"),
-  RESEND_API_KEY: requireEnv("RESEND_API_KEY"),
-  GOOGLE_GEMINI_API_KEY: requireEnv("GOOGLE_GEMINI_API_KEY"),
-  SUPO_SUPER_ADMIN_EMAILS: requireEnv("SUPO_SUPER_ADMIN_EMAILS"),
-  BETTER_AUTH_ADMIN_USER_IDS: requireEnv("BETTER_AUTH_ADMIN_USER_IDS"),
-  SECURITY_ALERT_FROM_EMAIL: optionalEnv("SECURITY_ALERT_FROM_EMAIL"),
-  ABLY_API_KEY: optionalEnv("ABLY_API_KEY"),
+  get DATABASE_URL() {
+    return requireEnv("DATABASE_URL");
+  },
+  // Disable TLS for local Postgres (`DATABASE_SSL=disable` or `sslmode=disable` in the URL).
+  get DATABASE_SSL() {
+    return optionalEnv("DATABASE_SSL");
+  },
+  get BETTER_AUTH_API_KEY() {
+    return requireEnv("BETTER_AUTH_API_KEY");
+  },
+  get BETTER_AUTH_SECRET() {
+    return requireEnv("BETTER_AUTH_SECRET");
+  },
+  get BETTER_AUTH_URL() {
+    return requireEnv("BETTER_AUTH_URL");
+  },
+  get GOOGLE_CLIENT_ID() {
+    return requireEnv("GOOGLE_CLIENT_ID");
+  },
+  get GOOGLE_CLIENT_SECRET() {
+    return requireEnv("GOOGLE_CLIENT_SECRET");
+  },
+  get GITHUB_CLIENT_ID() {
+    return requireEnv("GITHUB_CLIENT_ID");
+  },
+  get GITHUB_CLIENT_SECRET() {
+    return requireEnv("GITHUB_CLIENT_SECRET");
+  },
+  get RESEND_API_KEY() {
+    return requireEnv("RESEND_API_KEY");
+  },
+  get GOOGLE_GEMINI_API_KEY() {
+    return requireEnv("GOOGLE_GEMINI_API_KEY");
+  },
+  get SUPO_SUPER_ADMIN_EMAILS() {
+    return requireEnv("SUPO_SUPER_ADMIN_EMAILS");
+  },
+  get BETTER_AUTH_ADMIN_USER_IDS() {
+    return requireEnv("BETTER_AUTH_ADMIN_USER_IDS");
+  },
+  get SECURITY_ALERT_FROM_EMAIL() {
+    return optionalEnv("SECURITY_ALERT_FROM_EMAIL");
+  },
+  get ABLY_API_KEY() {
+    return optionalEnv("ABLY_API_KEY");
+  },
+  // Shared secret for internal server-to-server routes and Vercel Cron
+  // (Vercel sends `Authorization: Bearer $CRON_SECRET`).
+  get CRON_SECRET() {
+    return optionalEnv("CRON_SECRET");
+  },
 };

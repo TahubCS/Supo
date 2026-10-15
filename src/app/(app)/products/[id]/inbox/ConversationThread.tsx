@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProductRole } from "@/lib/product-access";
+import { conversationChannelName } from "@/lib/realtime-channels";
 
 import {
   closeAblyClient,
@@ -157,7 +158,7 @@ export function ConversationThread({
   // Subscribe to real-time messages on the conversation channel.
   useEffect(() => {
     if (!ablyClient || !conversationId || !canViewThread) return;
-    const ch = ablyClient.channels.get(`org:${orgId}:conversation:${conversationId}`);
+    const ch = ablyClient.channels.get(conversationChannelName(orgId, productId, conversationId));
 
     function onMessage(msg: Ably.Message) {
       const d = msg.data as {
@@ -191,7 +192,7 @@ export function ConversationThread({
         // Channel may already be detached during Fast Refresh.
       }
     };
-  }, [ablyClient, canViewThread, conversationId, orgId]);
+  }, [ablyClient, canViewThread, conversationId, orgId, productId]);
 
   if (!conversation) {
     return (

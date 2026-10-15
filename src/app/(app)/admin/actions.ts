@@ -11,7 +11,8 @@ import { requireSuperAdmin } from "@/lib/admin-server";
 
 export type AdminUserSession = {
   id: string;
-  token: string;
+  // Never send raw session tokens to the browser; a short preview is enough to tell sessions apart.
+  tokenPreview: string;
   ipAddress: string | null;
   userAgent: string | null;
   createdAt: string;
@@ -78,7 +79,7 @@ function serializeSession(session: {
 }): AdminUserSession {
   return {
     id: session.id,
-    token: session.token,
+    tokenPreview: `${session.token.slice(0, 6)}…${session.token.slice(-4)}`,
     ipAddress: session.ipAddress ?? null,
     userAgent: session.userAgent ?? null,
     createdAt: session.createdAt.toISOString(),
@@ -116,27 +117,27 @@ export async function listUserSessions(userId: string): Promise<AdminUserSession
   return sessions.map(serializeSession);
 }
 
-export async function revokeUserSession(sessionToken: string, targetUserId: string): Promise<void> {
+export async function revokeUserSession(sessionId: string, targetUserId: string): Promise<void> {
   const adminSession = await requireSuperAdmin();
   const headerList = await headers();
   assertCanTargetUser(targetUserId);
   const [targetSession] = await db
     .select({ userId: sessionTable.userId })
     .from(sessionTable)
-    .where(eq(sessionTable.token, sessionToken))
+    .where(eq(sessionTable.id, sessionId))
     .limit(1);
 
   if (!targetSession || targetSession.userId !== targetUserId) {
     throw new Error("Session does not belong to the selected user.");
   }
 
-  await db.delete(sessionTable).where(eq(sessionTable.token, sessionToken));
+  await db.delete(sessionTable).where(eq(sessionTable.id, sessionId));
 
   await writeAuditLog({
     adminUserId: adminSession.user.id,
     targetUserId,
     action: "admin.revoke_user_session",
-    metadata: { tokenPreview: sessionToken.slice(0, 8) },
+    metadata: { sessionId },
     headerList,
   });
 

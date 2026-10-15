@@ -69,7 +69,7 @@ export async function createProduct(
     });
     fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": env.BETTER_AUTH_API_KEY },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.CRON_SECRET ?? ""}` },
       body: JSON.stringify({ sourceId, productId: id }),
     }).catch(() => {});
   }

@@ -92,7 +92,10 @@ Supo currently includes early-stage SaaS hardening:
 - Admin impersonation is intentionally disabled.
 - Super-admin actions are audited.
 - Admin can view/revoke sessions and ban/unban users.
-- Public auth and chat endpoints are rate limited through Upstash Redis.
+- Public auth and all widget endpoints (including `/api/widget/*` aliases) are rate limited through Upstash Redis.
+- Products can restrict the widget to an allow-list of website origins (Widget → Allowed websites).
+- Realtime tokens are scoped to a single product; agents cannot subscribe to other products' conversations or publish inbox events.
+- Internal and cron routes use a dedicated `CRON_SECRET` with constant-time comparison.
 - Public widget conversation reads/subscriptions require `conversationId + conversationToken`.
 - Widget polling is rate limited and rejects invalid `since` timestamps.
 - Proxy-level checks reject oversized chat requests and invalid auth POST requests.
@@ -126,6 +129,8 @@ Notes:
 - `BETTER_AUTH_ADMIN_USER_IDS` should contain only the trusted owner/admin Better Auth user id.
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
 - `ABLY_API_KEY` enables realtime inbox/widget updates. The widget keeps polling as a fallback if Ably is absent.
+- `CRON_SECRET` authorizes Vercel Cron and internal job routes. Vercel sends it as `Authorization: Bearer $CRON_SECRET` automatically when the variable is set on the project.
+- `DATABASE_SSL=disable` (or `sslmode=disable` in the URL) turns off TLS for a local Postgres.
 - Resend's `onboarding@resend.dev` sender is only reliable for the Resend account owner's inbox until a verified domain is configured.
 
 ## Local Development
@@ -159,6 +164,8 @@ http://localhost:3000
 ```bash
 bun run dev          # Start local dev server
 bun run lint         # Run ESLint
+bun run typecheck    # Type-check the app
+bun run test         # Run unit tests (Vitest)
 bun run build        # Production build and TypeScript check
 bun run db:generate  # Generate Drizzle migrations
 bun run db:migrate   # Apply Drizzle migrations
@@ -180,7 +187,13 @@ Current core tables include:
 - Knowledge: `knowledge_source`, `knowledge_suggestion`, `knowledge_chunk`
 - Admin/security: `admin_audit_log`, `security_event`
 
-The latest migration at this release is `0012_conversation_public_access_token`, which adds the widget bearer token used for public conversation access.
+Migrations from `0017` onward are hand-written, idempotent SQL registered in `drizzle/meta/_journal.json` (the Drizzle snapshots for 0012–0016 are missing, so do not rely on `db:generate` until a fresh baseline snapshot is created).
+
+`0018_repair_knowledge_schema` repairs databases that skipped the knowledge-base migrations: journal entries 0002–0005 carry older timestamps than 0001, and Drizzle only applies migrations newer than the last applied one. To check a database, run:
+
+```sql
+select id, hash, created_at from drizzle.__drizzle_migrations order by created_at;
+```
 
 Migrations live in:
 

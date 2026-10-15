@@ -23,6 +23,8 @@ import {
   findWidgetConversation,
 } from "@/lib/widget-conversation-access";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
+import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { checkWidgetOrigin } from "@/lib/widget-origin";
 import {
   normalizeWidgetCustomer,
   resolveWidgetCustomer,
@@ -31,22 +33,18 @@ import {
 
 export const maxDuration = 60;
 
-// Widget runs on any customer domain — CORS must be fully open.
-const CORS: HeadersInit = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Expose-Headers": "x-conversation-id, x-conversation-token, x-sources, x-escalation-status",
-};
+// Widget runs on customer domains. CORS is open unless the product configures
+// an origin allow-list (see src/lib/widget-cors.ts).
 // Cap widget messages to limit abuse and keep prompt size bounded.
 const MAX_WIDGET_MESSAGE_LENGTH = 2000;
 
-export function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS });
+export function OPTIONS(req: NextRequest) {
+  return new Response(null, { status: 204, headers: widgetCorsHeaders(req.headers.get("origin"), null) });
 }
 
 // Returns the widget configuration (bot name, theme, etc.) to the widget JS on load.
 export async function GET(req: NextRequest) {
+  let CORS = widgetCorsHeaders(req.headers.get("origin"), null);
   const productId = req.nextUrl.searchParams.get("productId");
   if (!productId) {
     return NextResponse.json({ error: "productId required" }, { status: 400, headers: CORS });
@@ -59,6 +57,11 @@ export async function GET(req: NextRequest) {
   if (!found) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const originCheck = await checkWidgetOrigin(req.headers, productId);
+  if (!originCheck.allowed) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403, headers: originCheck.cors });
+  }
+  CORS = originCheck.cors;
 
   return NextResponse.json(normalizeWidgetConfig(found.widgetConfigs[0]), { headers: CORS });
 }
@@ -71,9 +74,9 @@ type ChatRequest = {
   customer: WidgetCustomerInput;
 };
 
-function quotaErrorResponse(error: unknown) {
+function quotaErrorResponse(error: unknown, cors: Headers) {
   if (!isSecurityQuotaError(error)) return null;
-  const headers = new Headers(CORS);
+  const headers = new Headers(cors);
   headers.set("Content-Type", "application/json");
   if (error.retryAfter) {
     headers.set("Retry-After", String(error.retryAfter));
@@ -96,6 +99,7 @@ function shouldNotifyAgent(text: string, hasRelevantKnowledge: boolean): boolean
 }
 
 export async function POST(req: NextRequest) {
+  let CORS = widgetCorsHeaders(req.headers.get("origin"), null);
   let body: ChatRequest;
   try {
     body = (await req.json()) as ChatRequest;
@@ -132,6 +136,11 @@ export async function POST(req: NextRequest) {
   if (!foundProduct) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const originCheck = await checkWidgetOrigin(req.headers, productId);
+  if (!originCheck.allowed) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403, headers: originCheck.cors });
+  }
+  CORS = originCheck.cors;
 
   try {
     const event = {
@@ -152,7 +161,7 @@ export async function POST(req: NextRequest) {
       metadata: { customerIdentity: safeQuotaKey(normalizedCustomer.identityKey) },
     });
   } catch (error) {
-    const response = quotaErrorResponse(error);
+    const response = quotaErrorResponse(error, CORS);
     if (response) return response;
     throw error;
   }
@@ -262,7 +271,7 @@ export async function POST(req: NextRequest) {
       .update(conversation)
       .set({ lastMessageAt: now, updatedAt: now })
       .where(eq(conversation.id, conv.id));
-    publishToConversation(orgId, conv.id, "message", {
+    publishToConversation(orgId, productId, conv.id, "message", {
       id: customerMessageId,
       body: trimmedMessage,
       senderType: "customer",
@@ -305,7 +314,7 @@ export async function POST(req: NextRequest) {
       metadata: { conversationId: conv.id },
     });
   } catch (error) {
-    const response = quotaErrorResponse(error);
+    const response = quotaErrorResponse(error, CORS);
     if (response) return response;
     throw error;
   }
@@ -323,7 +332,7 @@ export async function POST(req: NextRequest) {
     .update(conversation)
     .set({ lastMessageAt: now, updatedAt: now })
     .where(eq(conversation.id, conv.id));
-  publishToConversation(orgId, conv.id, "message", {
+  publishToConversation(orgId, productId, conv.id, "message", {
     id: customerMessageId,
     body: trimmedMessage,
     senderType: "customer",
@@ -460,7 +469,7 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(conversation.id, convId));
       // Push AI reply to any agent viewing this conversation in real-time.
-      publishToConversation(orgId, convId, "message", {
+      publishToConversation(orgId, productId, convId, "message", {
         id: newMsgId,
         body: text,
         senderType: "ai",
@@ -481,7 +490,7 @@ export async function POST(req: NextRequest) {
         },
       }).catch(() => {});
       if (notifyAgent) {
-        publishToConversation(orgId, convId, "escalation_update", {
+        publishToConversation(orgId, productId, convId, "escalation_update", {
           status: "pending",
         }).catch(() => {});
         publishToProductInbox(orgId, productId, "needs_agent", {
@@ -503,7 +512,7 @@ export async function POST(req: NextRequest) {
   const streamResponse = result.toTextStreamResponse();
   const headers = new Headers(streamResponse.headers);
 
-  Object.entries(CORS).forEach(([k, v]) => headers.set(k, v));
+  CORS.forEach((value, key) => headers.set(key, value));
   // Widget reads x-conversation-id on the first response and stores it for subsequent turns.
   headers.set("x-conversation-id", convId);
   headers.set("x-conversation-token", conv.publicAccessToken);

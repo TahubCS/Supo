@@ -1,6 +1,11 @@
 import * as Ably from "ably";
 
 import { env } from "@/lib/env";
+import {
+  conversationChannelName,
+  inboxChannelName,
+  presenceChannelName,
+} from "@/lib/realtime-channels";
 
 let _rest: Ably.Rest | null = null;
 
@@ -16,23 +21,18 @@ function getRestClient(): Ably.Rest | null {
   return _rest;
 }
 
-// Channel name helpers — orgId embedded for multi-tenant isolation at scale.
-export function conversationChannelName(orgId: string, convId: string) {
-  return `org:${orgId}:conversation:${convId}`;
-}
-
-export function inboxChannelName(orgId: string, productId: string) {
-  return `org:${orgId}:product:${productId}:inbox`;
-}
-
-export function presenceChannelName(orgId: string, productId: string) {
-  return `org:${orgId}:product:${productId}:presence`;
-}
+export {
+  conversationChannelName,
+  inboxChannelName,
+  presenceChannelName,
+  productConversationsChannelPattern,
+} from "@/lib/realtime-channels";
 
 // Server-side publish helpers. Both are fire-and-forget safe — callers wrap
 // in .catch(() => {}) so Ably failures never crash the user flow.
 export async function publishToConversation(
   orgId: string,
+  productId: string,
   convId: string,
   event: string,
   data: object,
@@ -40,7 +40,7 @@ export async function publishToConversation(
   const rest = getRestClient();
   if (!rest) return;
   await rest.channels
-    .get(conversationChannelName(orgId, convId))
+    .get(conversationChannelName(orgId, productId, convId))
     .publish(event, { v: 1, ...data });
 }
 

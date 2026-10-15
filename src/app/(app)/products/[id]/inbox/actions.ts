@@ -95,7 +95,7 @@ function publishConversationLifecycleUpdate({
 
   if (notifyWidget) {
     publishes.push(
-      publishToConversation(organizationId, conversationId, "escalation_update", {
+      publishToConversation(organizationId, productId, conversationId, "escalation_update", {
         status: escalationStatus,
       }),
     );
@@ -202,7 +202,7 @@ export async function joinConversation(conversationId: string): Promise<void> {
     .where(eq(conversation.id, conversationId));
 
   Promise.allSettled([
-    publishToConversation(membership.organizationId, conversationId, "escalation_update", {
+    publishToConversation(membership.organizationId, conv.productId, conversationId, "escalation_update", {
       status: "active",
     }),
     publishConversationLifecycleUpdate({
@@ -260,14 +260,14 @@ export async function sendMessage(
 
   // Publish real-time events to widget and any other agents viewing this thread.
   Promise.allSettled([
-    publishToConversation(membership.organizationId, conversationId, "message", {
+    publishToConversation(membership.organizationId, conv.productId, conversationId, "message", {
       id: newMsgId,
       body,
       senderType: "agent",
       senderName: session.user.name,
       createdAt: now.toISOString(),
     }),
-    publishToConversation(membership.organizationId, conversationId, "escalation_update", {
+    publishToConversation(membership.organizationId, conv.productId, conversationId, "escalation_update", {
       status: "active",
     }),
     publishConversationLifecycleUpdate({

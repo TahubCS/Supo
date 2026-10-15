@@ -15,16 +15,16 @@ import {
   resolveWidgetCustomer,
   type WidgetCustomerInput,
 } from "@/lib/widget-customer";
+import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { checkWidgetOrigin } from "@/lib/widget-origin";
 
-// Same CORS policy as /api/chat — widget runs on any customer domain.
-const CORS: HeadersInit = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+const METHODS = "POST, OPTIONS";
 
-export function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS });
+export function OPTIONS(req: NextRequest) {
+  return new Response(null, {
+    status: 204,
+    headers: widgetCorsHeaders(req.headers.get("origin"), null, METHODS),
+  });
 }
 
 type EscalateRequest = {
@@ -35,6 +35,7 @@ type EscalateRequest = {
 };
 
 export async function POST(req: NextRequest) {
+  let CORS = widgetCorsHeaders(req.headers.get("origin"), null, METHODS);
   let body: EscalateRequest;
   try {
     body = (await req.json()) as EscalateRequest;
@@ -58,6 +59,11 @@ export async function POST(req: NextRequest) {
   if (!foundProduct) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const originCheck = await checkWidgetOrigin(req.headers, productId, METHODS);
+  if (!originCheck.allowed) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403, headers: originCheck.cors });
+  }
+  CORS = originCheck.cors;
 
   try {
     await requireSecurityQuota("chat.escalate.conversation", conversationId, {
@@ -120,7 +126,7 @@ export async function POST(req: NextRequest) {
 
   // Publish real-time events — fire-and-forget; never block the API response.
   Promise.allSettled([
-    publishToConversation(foundProduct.organizationId, conv.id, "escalation_update", {
+    publishToConversation(foundProduct.organizationId, productId, conv.id, "escalation_update", {
       status: "pending",
     }),
     publishToProductInbox(foundProduct.organizationId, productId, "needs_agent", {

@@ -2,14 +2,13 @@ import { sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { env } from "@/lib/env";
+import { isAuthorizedInternalRequest } from "@/lib/internal-auth";
 import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
 
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
-  const apiKey = req.headers.get("x-api-key");
-  if (apiKey !== env.BETTER_AUTH_API_KEY) {
+  if (!isAuthorizedInternalRequest(req.headers)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

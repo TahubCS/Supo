@@ -14,14 +14,31 @@ const redis =
       })
     : null;
 
-// Must stay in sync with the CORS constant in src/app/api/chat/route.ts.
+// Error responses for public widget endpoints must carry CORS headers so the
+// embedding page can read the status. Successful responses get CORS from the
+// route handlers themselves (see src/lib/widget-cors.ts).
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Expose-Headers": "x-conversation-id, x-conversation-token, x-sources, x-escalation-status",
 };
 const MAX_CHAT_BODY_BYTES = 16 * 1024;
+
+// Public, unauthenticated widget endpoints. Legacy paths and their
+// /api/widget/* aliases share handlers and must share protections.
+const WIDGET_SEND_PATHS = new Set(["/api/chat", "/api/widget/messages"]);
+const WIDGET_ESCALATE_PATHS = new Set(["/api/chat/escalate", "/api/widget/escalations"]);
+const WIDGET_READ_PATHS = new Set([
+  "/api/widget/config",
+  "/api/messages/poll",
+  "/api/widget/messages/poll",
+  "/api/ably/token",
+  "/api/widget/realtime/token",
+]);
+
+function isWidgetPath(path: string): boolean {
+  return WIDGET_SEND_PATHS.has(path) || WIDGET_ESCALATE_PATHS.has(path) || WIDGET_READ_PATHS.has(path);
+}
 const AUTH_POST_PATHS = new Set([
   "/api/auth/sign-in/email",
   "/api/auth/sign-up/email",
@@ -46,6 +63,18 @@ const limiters = redis
         redis,
         limiter: Ratelimit.slidingWindow(15, "60 s"),
         prefix: "rl:chat:get",
+      }),
+      widgetEscalate: new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(10, "60 s"),
+        prefix: "rl:widget:escalate",
+      }),
+      // Polling runs every few seconds per open widget; one office IP may host
+      // many customers or agents, so this is deliberately generous.
+      widgetRead: new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(240, "60 s"),
+        prefix: "rl:widget:read",
       }),
       signIn: new Ratelimit({
         redis,
@@ -89,7 +118,7 @@ function rateLimitUnavailable(path: string): NextResponse {
       status: 503,
       headers: {
         "Content-Type": "application/json",
-        ...(path === "/api/chat" ? CORS_HEADERS : {}),
+        ...(isWidgetPath(path) ? CORS_HEADERS : {}),
       },
     },
   );
@@ -105,7 +134,7 @@ function jsonResponse(
     status,
     headers: {
       "Content-Type": "application/json",
-      ...(path === "/api/chat" ? CORS_HEADERS : {}),
+      ...(isWidgetPath(path) ? CORS_HEADERS : {}),
       ...headers,
     },
   });
@@ -127,7 +156,7 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   // OPTIONS preflight must never be blocked; the route handler owns the 204.
   if (method === "OPTIONS") return NextResponse.next();
 
-  if (path === "/api/chat") {
+  if (WIDGET_SEND_PATHS.has(path) || WIDGET_ESCALATE_PATHS.has(path)) {
     const contentLength = Number.parseInt(req.headers.get("content-length") ?? "0", 10);
     if (method === "POST" && Number.isFinite(contentLength) && contentLength > MAX_CHAT_BODY_BYTES) {
       return jsonResponse(path, 413, { error: "Request body too large." });
@@ -151,8 +180,14 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   const ip = getIp(req);
 
   try {
-    if (path === "/api/chat") {
-      const limiter = method === "POST" ? limiters.chatPost : limiters.chatGet;
+    if (isWidgetPath(path)) {
+      const limiter = WIDGET_SEND_PATHS.has(path)
+        ? method === "POST"
+          ? limiters.chatPost
+          : limiters.chatGet
+        : WIDGET_ESCALATE_PATHS.has(path)
+          ? limiters.widgetEscalate
+          : limiters.widgetRead;
       const result = await limiter.limit(ip);
       if (!result.success) {
         return jsonResponse(
@@ -199,6 +234,10 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
 export const config = {
   matcher: [
     "/api/chat",
+    "/api/chat/escalate",
+    "/api/messages/poll",
+    "/api/ably/token",
+    "/api/widget/:path*",
     "/api/auth/sign-in/email",
     "/api/auth/sign-up/email",
     "/api/auth/request-password-reset",

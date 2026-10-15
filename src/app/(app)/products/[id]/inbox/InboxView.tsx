@@ -13,6 +13,7 @@ import { ConversationList } from "./ConversationList";
 import { ConversationThread } from "./ConversationThread";
 import type { ConversationWithDetails } from "./types";
 import type { ProductRole } from "@/lib/product-access";
+import { inboxChannelName, presenceChannelName } from "@/lib/realtime-channels";
 
 function playNotificationSound() {
   try {
@@ -84,14 +85,14 @@ export function InboxView({
 
     // Join presence so the widget can show a live agent count.
     const presenceCh = client.channels.get(
-      `org:${orgId}:product:${productId}:presence`,
+      presenceChannelName(orgId, productId),
     );
     const presenceEnter = Promise.resolve(presenceCh.presence.enter({ name: userName }))
       .catch(ignoreExpectedAblyTeardown);
 
     // Subscribe to inbox-level events for this product.
     const inboxCh = client.channels.get(
-      `org:${orgId}:product:${productId}:inbox`,
+      inboxChannelName(orgId, productId),
     );
 
     const needsAgentSub = Promise.resolve(inboxCh.subscribe("needs_agent", (msg) => {

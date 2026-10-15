@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 
 import { env } from "@/lib/env";
+import { escapeHtml } from "@/lib/html";
 import type { ProductRole } from "@/lib/product-access";
 
 const INVITE_FROM = env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>";
@@ -38,11 +39,11 @@ export async function sendProductInviteEmail({
     const response = await resend.emails.send({
       from: INVITE_FROM,
       to,
-      subject: `You were invited to ${productName} on Supo`,
+      subject: `You were invited to ${productName.replace(/[\r\n]+/g, " ")} on Supo`,
       html: `
         <p>Hi there,</p>
-        <p>${inviterName} invited you to work on <strong>${productName}</strong> in Supo as a <strong>${role}</strong>.</p>
-        <p><a href="${appUrl}/sign-up?email=${encodeURIComponent(to)}" style="color:#000;font-weight:600">Accept invite</a></p>
+        <p>${escapeHtml(inviterName)} invited you to work on <strong>${escapeHtml(productName)}</strong> in Supo as a <strong>${escapeHtml(role)}</strong>.</p>
+        <p><a href="${escapeHtml(`${appUrl}/sign-up?email=${encodeURIComponent(to)}`)}" style="color:#000;font-weight:600">Accept invite</a></p>
         <p style="color:#737373;font-size:13px">After you sign in with this email, Supo will automatically apply the product role if the invite is still active.</p>
       `,
     });
