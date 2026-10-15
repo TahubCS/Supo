@@ -8,16 +8,22 @@ import { geminiEmbedManyWithModel } from "./ai";
 import { buildEmbeddingText, chunkDocument } from "./chunk";
 import { crawlSite } from "./crawl";
 import { extractDocument } from "./extract";
+import { loadGitHubAppDocuments } from "./github";
 
 type KnowledgeChunkInsert = typeof knowledgeChunk.$inferInsert;
 type KnowledgeSourceRow = typeof knowledgeSource.$inferSelect;
 
-export type IndexDocument = { title: string | null; url: string | null; text: string };
+// `version` identifies unchanged content cheaply (e.g. a git blob SHA); without
+// it the text itself is used. Unchanged documents reuse their stored embeddings.
+export type IndexDocument = { title: string | null; url: string | null; text: string; version?: string };
 
 type LoadedDocuments = {
   docs: IndexDocument[];
   failedPages: number;
   totalPages: number;
+  warnings?: string[];
+  // GitHub App sources: the commit that was indexed.
+  commitSha?: string;
 };
 
 export const DEFAULT_MAX_PAGES = 50;
@@ -39,7 +45,7 @@ export async function computeHash(text: string): Promise<string> {
 
 export async function hashDocuments(docs: IndexDocument[]): Promise<string> {
   const canonical = [...docs]
-    .sort((a, b) => (a.url ?? "").localeCompare(b.url ?? ""))
+    .sort((a, b) => (a.url ?? "").localeCompare(b.url ?? "") || (a.title ?? "").localeCompare(b.title ?? ""))
     .map((d) => `${d.url ?? ""}\n${d.title ?? ""}\n${d.text}`)
     .join("\n\u0000\n");
   return computeHash(canonical);
@@ -126,6 +132,14 @@ export async function loadSourceDocuments(source: KnowledgeSourceRow): Promise<L
       return { docs: [await fetchPageDocument(source.url)], failedPages: 0, totalPages: 1 };
     }
     case "github": {
+      const github = source.settings?.github;
+      if (source.githubInstallationId && source.githubRepoId && github) {
+        const result = await loadGitHubAppDocuments(source.githubInstallationId, source.githubRepoId, github);
+        if (result.docs.length === 0) {
+          throw new Error("No README, documentation, release notes or issues found in this repository");
+        }
+        return result;
+      }
       if (!source.url) throw new Error("No repository URL");
       const docs = await fetchGitHubDocuments(source.url);
       return { docs, failedPages: 0, totalPages: docs.length };
@@ -154,43 +168,116 @@ export async function loadSourceDocuments(source: KnowledgeSourceRow): Promise<L
 // Chunk + embed
 // ---------------------------------------------------------------------------
 
+// Bump when chunking or embedding text changes so stored embeddings are rebuilt.
+const CHUNKING_VERSION = 1;
+
+type ReusableChunk = Pick<KnowledgeChunkInsert, "content" | "embedding" | "embeddingModel" | "metadata">;
+
+async function documentKey(doc: IndexDocument, title: string): Promise<string> {
+  return computeHash(
+    [CHUNKING_VERSION, title, doc.url ?? "", doc.version ? `v:${doc.version}` : `t:${doc.text}`].join("\n\u0000\n"),
+  );
+}
+
+/** Embedded chunks of the source's current index, grouped by document key. */
+export async function loadReusableChunks(sourceId: string): Promise<Map<string, ReusableChunk[]>> {
+  const rows = await db
+    .select({
+      content: knowledgeChunk.content,
+      embedding: knowledgeChunk.embedding,
+      embeddingModel: knowledgeChunk.embeddingModel,
+      metadata: knowledgeChunk.metadata,
+    })
+    .from(knowledgeChunk)
+    .where(eq(knowledgeChunk.sourceId, sourceId));
+
+  const byKey = new Map<string, (ReusableChunk & { index: number })[]>();
+  for (const row of rows) {
+    if (!row.embedding || !row.embeddingModel || !row.metadata) continue;
+    let meta: { docKey?: unknown; chunkIndex?: unknown };
+    try {
+      meta = JSON.parse(row.metadata) as typeof meta;
+    } catch {
+      continue;
+    }
+    if (typeof meta.docKey !== "string") continue;
+    const list = byKey.get(meta.docKey) ?? [];
+    list.push({ ...row, index: typeof meta.chunkIndex === "number" ? meta.chunkIndex : list.length });
+    byKey.set(meta.docKey, list);
+  }
+
+  const result = new Map<string, ReusableChunk[]>();
+  for (const [key, list] of byKey) {
+    list.sort((a, b) => a.index - b.index);
+    // Mixed models inside one document can't be reused safely.
+    if (new Set(list.map((chunk) => chunk.embeddingModel)).size === 1) result.set(key, list);
+  }
+  return result;
+}
+
 export async function buildChunkRows(
   docs: IndexDocument[],
   source: Pick<KnowledgeSourceRow, "id" | "productId" | "name">,
-): Promise<KnowledgeChunkInsert[]> {
-  const prepared: { content: string; embedText: string; metadata: Record<string, unknown> }[] = [];
+  reusable: Map<string, ReusableChunk[]> = new Map(),
+): Promise<{ rows: KnowledgeChunkInsert[]; reusedDocuments: number }> {
+  type Prepared =
+    | { kind: "embed"; content: string; embedText: string; metadata: Record<string, unknown> }
+    | { kind: "reuse"; chunk: ReusableChunk };
+  const prepared: Prepared[] = [];
+  let reusedDocuments = 0;
 
   for (const doc of docs) {
     const title = doc.title?.trim() || source.name;
+    const docKey = await documentKey(doc, title);
+    const previous = reusable.get(docKey);
+    if (previous && prepared.length + previous.length <= MAX_CHUNKS_PER_SOURCE) {
+      prepared.push(...previous.map((chunk) => ({ kind: "reuse" as const, chunk })));
+      reusedDocuments++;
+      continue;
+    }
     for (const chunk of chunkDocument(doc.text)) {
       prepared.push({
+        kind: "embed",
         content: chunk.content,
         embedText: buildEmbeddingText(chunk, title),
-        metadata: { title, url: doc.url, headingPath: chunk.headingPath, chunkIndex: chunk.index },
+        metadata: { title, url: doc.url, headingPath: chunk.headingPath, chunkIndex: chunk.index, docKey },
       });
       if (prepared.length >= MAX_CHUNKS_PER_SOURCE) break;
     }
     if (prepared.length >= MAX_CHUNKS_PER_SOURCE) break;
   }
 
-  if (prepared.length === 0) return [];
+  if (prepared.length === 0) return { rows: [], reusedDocuments: 0 };
 
-  const { embeddings, model } = await geminiEmbedManyWithModel(
-    prepared.map((p) => p.embedText),
-    source.productId,
-  );
+  const toEmbed = prepared.filter((p): p is Extract<Prepared, { kind: "embed" }> => p.kind === "embed");
+  const embedded = new Map<Prepared, { embedding: number[]; model: string }>();
+  if (toEmbed.length > 0) {
+    const { embeddings, model } = await geminiEmbedManyWithModel(
+      toEmbed.map((p) => p.embedText),
+      source.productId,
+    );
+    toEmbed.forEach((p, i) => embedded.set(p, { embedding: embeddings[i], model }));
+    const reusedModels = new Set(prepared.flatMap((p) => (p.kind === "reuse" ? [p.chunk.embeddingModel] : [])));
+    if (reusedModels.size > 0 && (reusedModels.size > 1 || !reusedModels.has(model))) {
+      // The product's embedding model changed since the last index: rebuild everything.
+      return buildChunkRows(docs, source);
+    }
+  }
+
   const now = new Date();
-
-  return prepared.map((p, i) => ({
-    id: crypto.randomUUID(),
-    sourceId: source.id,
-    productId: source.productId,
-    content: p.content,
-    embedding: embeddings[i],
-    embeddingModel: model,
-    metadata: JSON.stringify(p.metadata),
-    createdAt: now,
-  }));
+  const rows = prepared.map((p): KnowledgeChunkInsert => {
+    const base = { id: crypto.randomUUID(), sourceId: source.id, productId: source.productId, createdAt: now };
+    if (p.kind === "reuse") return { ...base, ...p.chunk };
+    const result = embedded.get(p)!;
+    return {
+      ...base,
+      content: p.content,
+      embedding: result.embedding,
+      embeddingModel: result.model,
+      metadata: JSON.stringify(p.metadata),
+    };
+  });
+  return { rows, reusedDocuments };
 }
 
 // ---------------------------------------------------------------------------
@@ -224,13 +311,16 @@ export async function ingestSource(sourceId: string, options: IngestOptions = {}
 
   try {
     const loaded = options.preloaded ?? (await loadSourceDocuments(source));
-    const rows = await buildChunkRows(loaded.docs, source);
+    const { rows } = await buildChunkRows(loaded.docs, source, await loadReusableChunks(sourceId));
     if (rows.length === 0) throw new Error("No indexable text found");
 
     const contentHash = await hashDocuments(loaded.docs);
     const now = new Date();
-    const warning =
-      loaded.failedPages > 0 ? `${loaded.failedPages} of ${loaded.totalPages} pages could not be fetched` : null;
+    const warnings = [
+      loaded.failedPages > 0 ? `${loaded.failedPages} of ${loaded.totalPages} pages could not be fetched` : null,
+      ...(loaded.warnings ?? []),
+    ].filter(Boolean);
+    const warning = warnings.length > 0 ? `${warnings.join("; ")}.`.replace(/^./, (c) => c.toUpperCase()) : null;
 
     await db.transaction(async (tx) => {
       // Lock the source row; it may have been deleted (the FK would reject the
@@ -259,6 +349,11 @@ export async function ingestSource(sourceId: string, options: IngestOptions = {}
           lastCheckedAt: now,
           indexingStartedAt: null,
           errorMessage: warning,
+          ...(loaded.commitSha
+            ? {
+                settings: sql`jsonb_set(coalesce(${knowledgeSource.settings}, '{}'::jsonb), '{github,lastCommitSha}', to_jsonb(${loaded.commitSha}::text))`,
+              }
+            : {}),
           updatedAt: now,
         })
         .where(eq(knowledgeSource.id, sourceId));

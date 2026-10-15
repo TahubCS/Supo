@@ -8,7 +8,24 @@ import { knowledgeChunk, knowledgeSource, knowledgeSuggestion, widgetConfig } fr
 import { drainSoon, queueSourceIndexing } from "@/lib/jobs";
 import { geminiGenerate } from "@/lib/knowledge/ai";
 import { parseUploadedFile } from "@/lib/knowledge/parse-file";
-import { MAX_ARTICLE_LENGTH, MAX_NAME_LENGTH, validateSourceInput, type AddSourceInput } from "@/lib/knowledge/sources";
+import {
+  MAX_ARTICLE_LENGTH,
+  MAX_NAME_LENGTH,
+  validateGitHubSourceInput,
+  validateSourceInput,
+  type AddGitHubSourceInput,
+  type AddSourceInput,
+} from "@/lib/knowledge/sources";
+import {
+  GitHubApiError,
+  getRepository,
+  githubAuthorizeUrl,
+  githubInstallUrl,
+  isGitHubAppConfigured,
+  listInstallationRepositories,
+} from "@/lib/github/app";
+import { findActiveInstallation, listLinkedInstallations, unlinkInstallation } from "@/lib/github/installations";
+import { createConnectState } from "@/lib/github/state";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
 import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 import { recordProductAudit } from "@/lib/audit";
@@ -126,6 +143,8 @@ export type UpdateSourceInput = {
 
 export async function updateSource(sourceId: string, input: UpdateSourceInput): Promise<void> {
   const source = await verifySourceAccess(sourceId);
+  // Repositories connected through the GitHub App are identified by ID, not URL.
+  if (source.githubRepoId) input = { ...input, url: undefined };
   const type = (source.type === "sitemap" ? "website" : source.type) as AddSourceInput["type"] | "conversation";
   const values = validateSourceInput({
     type: type === "conversation" ? "article" : type,
@@ -157,6 +176,156 @@ export async function updateSource(sourceId: string, input: UpdateSourceInput): 
     await queueSourceIndexing(sourceId);
   }
   await auditKnowledge(source.productId, "knowledge.source_updated", sourceId, { name: values.name, contentChanged });
+}
+
+// ---------------------------------------------------------------------------
+// GitHub App
+// ---------------------------------------------------------------------------
+
+export type GitHubConnection = {
+  configured: boolean;
+  installUrl: string | null;
+  authorizeUrl: string | null;
+  installations: { installationId: number; accountLogin: string; accountType: string; suspended: boolean }[];
+};
+
+export async function getGitHubConnection(productId: string): Promise<GitHubConnection> {
+  const access = await verifyProductAccess(productId);
+  if (!isGitHubAppConfigured()) return { configured: false, installUrl: null, authorizeUrl: null, installations: [] };
+
+  const installations = await listLinkedInstallations(access.product.organizationId);
+  return {
+    configured: true,
+    installUrl: githubInstallUrl(createConnectState(productId, access.session.user.id)),
+    authorizeUrl: githubAuthorizeUrl(createConnectState(productId, access.session.user.id)),
+    installations: installations.map((installation) => ({
+      installationId: installation.installationId,
+      accountLogin: installation.accountLogin,
+      accountType: installation.accountType,
+      suspended: Boolean(installation.suspendedAt),
+    })),
+  };
+}
+
+export type GitHubRepoOption = {
+  installationId: number;
+  accountLogin: string;
+  id: number;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  description: string | null;
+  archived: boolean;
+  alreadyAdded: boolean;
+};
+
+export async function listGitHubRepositories(
+  productId: string,
+): Promise<{ repos: GitHubRepoOption[]; errors: string[] }> {
+  const access = await verifyProductAccess(productId);
+  const organizationId = access.product.organizationId;
+  const installations = (await listLinkedInstallations(organizationId)).filter((i) => !i.suspendedAt);
+
+  const existing = await db.query.knowledgeSource.findMany({
+    where: and(eq(knowledgeSource.productId, productId), sql`${knowledgeSource.githubRepoId} IS NOT NULL`),
+    columns: { githubRepoId: true },
+  });
+  const added = new Set(existing.map((s) => s.githubRepoId));
+
+  const repos: GitHubRepoOption[] = [];
+  const errors: string[] = [];
+  for (const installation of installations) {
+    try {
+      for (const repo of await listInstallationRepositories(installation.installationId)) {
+        repos.push({
+          installationId: installation.installationId,
+          accountLogin: installation.accountLogin,
+          id: repo.id,
+          fullName: repo.fullName,
+          private: repo.private,
+          defaultBranch: repo.defaultBranch,
+          description: repo.description,
+          archived: repo.archived,
+          alreadyAdded: added.has(repo.id),
+        });
+      }
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) {
+        // Uninstalled while the webhook was missed.
+        await unlinkInstallation(organizationId, installation.installationId);
+        continue;
+      }
+      console.error("[github] listing repositories failed", error);
+      errors.push(`Could not load repositories for ${installation.accountLogin}`);
+    }
+  }
+  repos.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  return { repos, errors };
+}
+
+export async function addGitHubSource(productId: string, input: AddGitHubSourceInput): Promise<string> {
+  const access = await verifyProductAccess(productId);
+  await requireSourceQuota(productId, "/knowledge/add-github-source");
+  const values = validateGitHubSourceInput(input);
+
+  const installation = await findActiveInstallation(access.product.organizationId, input.installationId);
+  if (!installation) throw new Error("This GitHub account is not connected to your workspace");
+
+  let repo;
+  try {
+    repo = await getRepository(input.installationId, input.repoId);
+  } catch (error) {
+    if (error instanceof GitHubApiError && error.status === 404) {
+      throw new Error("Supo doesn't have access to this repository. Grant access in the GitHub App settings.");
+    }
+    throw error;
+  }
+
+  const duplicate = await db.query.knowledgeSource.findFirst({
+    where: and(eq(knowledgeSource.productId, productId), eq(knowledgeSource.githubRepoId, repo.id)),
+    columns: { id: true, settings: true },
+  });
+  if (duplicate && (duplicate.settings?.github?.branch ?? null) === values.branch) {
+    throw new Error(`${repo.fullName} is already in this knowledge base`);
+  }
+
+  const sourceId = crypto.randomUUID();
+  const now = new Date();
+  await db.insert(knowledgeSource).values({
+    id: sourceId,
+    productId,
+    type: "github",
+    name: values.name ?? repo.fullName,
+    url: repo.htmlUrl,
+    content: null,
+    settings: {
+      github: {
+        fullName: repo.fullName,
+        private: repo.private,
+        branch: values.branch,
+        includePaths: values.includePaths,
+        excludePaths: values.excludePaths,
+        includeReleases: values.includeReleases,
+        includeIssues: values.includeIssues,
+        lastCommitSha: null,
+      },
+    },
+    githubInstallationId: input.installationId,
+    githubRepoId: repo.id,
+    status: "indexing",
+    indexingStartedAt: now,
+    chunkCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await queueSourceIndexing(sourceId);
+  await auditKnowledge(productId, "knowledge.source_added", sourceId, {
+    type: "github",
+    name: values.name ?? repo.fullName,
+    repository: repo.fullName,
+  });
+  return sourceId;
 }
 
 export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {

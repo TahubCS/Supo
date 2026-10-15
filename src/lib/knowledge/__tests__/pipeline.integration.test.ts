@@ -12,10 +12,11 @@ vi.mock("next/server", () => ({ after: (fn: () => unknown) => void fn() }));
 
 // Lets a test run code in the middle of an ingest (between loading content and
 // swapping chunks), e.g. to simulate an edit landing mid-run.
-const hooks: { duringEmbed: (() => Promise<void>) | null } = { duringEmbed: null };
+const hooks: { duringEmbed: (() => Promise<void>) | null; embedded: string[] } = { duringEmbed: null, embedded: [] };
 vi.mock("@/lib/knowledge/ai", () => ({
   geminiEmbedQuery: async (text: string) => ({ embedding: fakeEmbedding(text), model: "fake-embed" }),
   geminiEmbedManyWithModel: async (texts: string[]) => {
+    hooks.embedded.push(...texts);
     if (hooks.duringEmbed) await hooks.duringEmbed();
     return { embeddings: texts.map(fakeEmbedding), model: "fake-embed" };
   },
@@ -162,6 +163,14 @@ describe.skipIf(!DATABASE_URL)("knowledge pipeline (database)", () => {
   it("does not overwrite an edit that lands while an ingest is running", async () => {
     const { eq, sql } = await import("drizzle-orm");
     const sourceId = await addArticle(productId, "Returns", "Returns are accepted within fourteen days of delivery for unused items.");
+    // An edit whose ingest (the stale run below) has new content to embed.
+    await mod.db
+      .update(mod.schema.knowledgeSource)
+      .set({
+        content: "Returns are accepted within thirty days of delivery for unused items.",
+        revision: sql`${mod.schema.knowledgeSource.revision} + 1`,
+      })
+      .where(eq(mod.schema.knowledgeSource.id, sourceId));
 
     hooks.duringEmbed = async () => {
       hooks.duringEmbed = null;
@@ -186,6 +195,46 @@ describe.skipIf(!DATABASE_URL)("knowledge pipeline (database)", () => {
     await mod.jobs.runJobNow(followUp);
     chunks = await mod.db.query.knowledgeChunk.findMany({ where: eq(mod.schema.knowledgeChunk.sourceId, sourceId) });
     expect(chunks.some((c) => c.content.includes("sixty days"))).toBe(true);
+  });
+
+  it("re-embeds only documents that changed since the last index", async () => {
+    const { eq } = await import("drizzle-orm");
+    const ingest = await import("@/lib/knowledge/ingest");
+    const sourceId = await addArticle(productId, "Repo docs", "placeholder");
+    const docs = [
+      { title: "Install", url: null, text: "Install the CLI with the installer script, then sign in.", version: "blob:a" },
+      { title: "Billing", url: null, text: "Invoices are sent on the first day of each month.", version: "blob:b" },
+    ];
+    const run = async (documents: typeof docs) => {
+      const source = await mod.db.query.knowledgeSource.findFirst({ where: eq(mod.schema.knowledgeSource.id, sourceId) });
+      hooks.embedded = [];
+      await ingest.ingestSource(sourceId, {
+        preloaded: { docs: documents, failedPages: 0, totalPages: documents.length },
+        preloadedRevision: source!.revision,
+      });
+      return mod.db.query.knowledgeChunk.findMany({ where: eq(mod.schema.knowledgeChunk.sourceId, sourceId) });
+    };
+
+    await run(docs);
+    expect(hooks.embedded.length).toBe(2);
+
+    // Nothing changed: every embedding is reused.
+    let chunks = await run(docs);
+    expect(hooks.embedded).toEqual([]);
+    expect(chunks).toHaveLength(2);
+    expect(chunks.every((c) => c.embedding && c.embeddingModel === "fake-embed")).toBe(true);
+
+    // One file changed: only that one is embedded again.
+    chunks = await run([docs[0], { ...docs[1], text: "Invoices are sent on the fifth day of each month.", version: "blob:c" }]);
+    expect(hooks.embedded).toHaveLength(1);
+    expect(hooks.embedded[0]).toContain("fifth day");
+    expect(chunks.map((c) => c.content).sort()).toEqual([
+      "Install the CLI with the installer script, then sign in.",
+      "Invoices are sent on the fifth day of each month.",
+    ]);
+
+    const retrieved = await mod.retrieve.retrieveKnowledge({ productId, query: "how do I install the CLI installer" });
+    expect(retrieved.chunks.some((c) => c.sourceId === sourceId && c.content.includes("Install the CLI"))).toBe(true);
   });
 
   it("ignores a stale run's failure after a newer edit", async () => {

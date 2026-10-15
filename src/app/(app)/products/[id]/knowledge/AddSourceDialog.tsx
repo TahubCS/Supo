@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,17 @@ import { Textarea } from "@/components/ui/textarea";
 import type { AddSourceInput } from "@/lib/knowledge/sources";
 
 import { addSource, uploadSourceFile } from "./actions";
+import { GitHubSourceForm } from "./GitHubSourceForm";
+
+// Results of the GitHub App connect round trip (see /api/integrations/github/callback).
+const GITHUB_RESULTS: Record<string, { ok: boolean; message: string }> = {
+  connected: { ok: true, message: "GitHub connected — choose a repository to add" },
+  cancelled: { ok: false, message: "GitHub authorization was cancelled" },
+  unauthorized: { ok: false, message: "Your GitHub account can't access that installation" },
+  "no-installations": { ok: false, message: "Install the GitHub App first, then try again" },
+  "not-configured": { ok: false, message: "The GitHub App is not configured on this server" },
+  error: { ok: false, message: "Could not connect GitHub. Please try again." },
+};
 
 // "file" is parsed server-side and stored as an article source.
 type SourceType = AddSourceInput["type"] | "file";
@@ -31,8 +42,21 @@ const segmentInactive = "text-[color:var(--text-secondary)] hover:text-foregroun
 
 export function AddSourceDialog({ productId }: { productId: string }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [type, setType] = useState<SourceType>("article");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const githubResult = searchParams.get("github");
+  // Back from GitHub: reopen the dialog on the GitHub tab to pick a repository.
+  const [returnedFromGitHub] = useState(() => githubResult === "connected" || githubResult === "no-installations");
+  const [open, setOpen] = useState(returnedFromGitHub);
+  const [type, setType] = useState<SourceType>(returnedFromGitHub ? "github" : "article");
+
+  useEffect(() => {
+    if (!githubResult) return;
+    const result = GITHUB_RESULTS[githubResult];
+    if (result?.ok) toast.success(result.message);
+    else if (result) toast.error(result.message);
+    router.replace(pathname);
+  }, [githubResult, pathname, router]);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
@@ -49,7 +73,7 @@ export function AddSourceDialog({ productId }: { productId: string }) {
     setFile(null);
   }
 
-  const needsUrl = type !== "article" && type !== "file";
+  const needsUrl = type === "website" || type === "url";
 
   function handleUpload() {
     if (!file) return;
@@ -123,106 +147,111 @@ export function AddSourceDialog({ productId }: { productId: string }) {
             ))}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="source-name" className="text-xs text-[color:var(--text-secondary)]">Name</Label>
-            <Input
-              id="source-name"
-              placeholder={type === "website" ? "e.g. Help center" : "e.g. Getting started guide"}
-              value={name}
-              maxLength={200}
-              onChange={(e) => setName(e.target.value)}
+          {type === "github" ? (
+            <GitHubSourceForm
+              productId={productId}
+              onAdded={() => {
+                setOpen(false);
+                reset();
+                router.refresh();
+              }}
             />
-          </div>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="source-name" className="text-xs text-[color:var(--text-secondary)]">Name</Label>
+                <Input
+                  id="source-name"
+                  placeholder={type === "website" ? "e.g. Help center" : "e.g. Getting started guide"}
+                  value={name}
+                  maxLength={200}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
 
-          {type === "file" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="source-file" className="text-xs text-[color:var(--text-secondary)]">Document</Label>
-              <Input
-                id="source-file"
-                type="file"
-                accept=".pdf,.docx,.md,.markdown,.txt,.csv,.html,.htm"
-                onChange={(e) => {
-                  const next = e.target.files?.[0] ?? null;
-                  setFile(next);
-                  if (next && !name.trim()) setName(next.name.replace(/\.[a-z0-9]+$/i, ""));
-                }}
-              />
-              <p className="text-xs text-[color:var(--text-tertiary)]">
-                PDF, Word (.docx), Markdown, text, CSV or HTML, up to 4 MB. Scanned PDFs without a text layer can&apos;t be read.
-              </p>
-            </div>
-          )}
+              {type === "file" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="source-file" className="text-xs text-[color:var(--text-secondary)]">Document</Label>
+                  <Input
+                    id="source-file"
+                    type="file"
+                    accept=".pdf,.docx,.md,.markdown,.txt,.csv,.html,.htm"
+                    onChange={(e) => {
+                      const next = e.target.files?.[0] ?? null;
+                      setFile(next);
+                      if (next && !name.trim()) setName(next.name.replace(/\.[a-z0-9]+$/i, ""));
+                    }}
+                  />
+                  <p className="text-xs text-[color:var(--text-tertiary)]">
+                    PDF, Word (.docx), Markdown, text, CSV or HTML, up to 4 MB. Scanned PDFs without a text layer can&apos;t be read.
+                  </p>
+                </div>
+              )}
 
-          {type === "article" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="source-content" className="text-xs text-[color:var(--text-secondary)]">Content</Label>
-              <Textarea
-                id="source-content"
-                placeholder="Paste documentation, FAQs or policies. Markdown headings (# Title) are used to split sections."
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                rows={8}
-                className="resize-y text-sm"
-              />
-            </div>
-          )}
+              {type === "article" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="source-content" className="text-xs text-[color:var(--text-secondary)]">Content</Label>
+                  <Textarea
+                    id="source-content"
+                    placeholder="Paste documentation, FAQs or policies. Markdown headings (# Title) are used to split sections."
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    rows={8}
+                    className="resize-y text-sm"
+                  />
+                </div>
+              )}
 
-          {needsUrl && (
-            <div className="space-y-1.5">
-              <Label htmlFor="source-url" className="text-xs text-[color:var(--text-secondary)]">
-                {type === "github" ? "Repository URL" : type === "website" ? "Website or docs URL" : "Page URL"}
-              </Label>
-              <Input
-                id="source-url"
-                type="url"
-                placeholder={
-                  type === "github"
-                    ? "https://github.com/owner/repo"
-                    : type === "website"
-                      ? "https://docs.your-site.com"
-                      : "https://your-site.com/help/page"
+              {needsUrl && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="source-url" className="text-xs text-[color:var(--text-secondary)]">
+                    {type === "website" ? "Website or docs URL" : "Page URL"}
+                  </Label>
+                  <Input
+                    id="source-url"
+                    type="url"
+                    placeholder={type === "website" ? "https://docs.your-site.com" : "https://your-site.com/help/page"}
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
+                  <p className="text-xs text-[color:var(--text-tertiary)]">
+                    {type === "website" &&
+                      "Pages are discovered from robots.txt / sitemap.xml, or by following links under this URL's path. Re-synced daily."}
+                    {type === "url" && "Only this page is indexed. Re-synced daily."}
+                  </p>
+                </div>
+              )}
+
+              {type === "website" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="source-max-pages" className="text-xs text-[color:var(--text-secondary)]">
+                    Maximum pages
+                  </Label>
+                  <Input
+                    id="source-max-pages"
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={maxPages}
+                    onChange={(e) => setMaxPages(Number(e.target.value) || 1)}
+                  />
+                </div>
+              )}
+
+              <Button
+                onClick={handleSubmit}
+                disabled={
+                  isPending ||
+                  (type === "file" ? !file : !name.trim()) ||
+                  (type === "article" && !content.trim()) ||
+                  (needsUrl && !url.trim())
                 }
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
-              <p className="text-xs text-[color:var(--text-tertiary)]">
-                {type === "website" &&
-                  "Pages are discovered from robots.txt / sitemap.xml, or by following links under this URL's path. Re-synced daily."}
-                {type === "url" && "Only this page is indexed. Re-synced daily."}
-                {type === "github" &&
-                  "Indexes the README and markdown files in docs/, doc/ or guides/. Public repositories only."}
-              </p>
-            </div>
+                className="w-full rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
+              >
+                {isPending ? "Adding…" : "Add & index"}
+              </Button>
+            </>
           )}
-
-          {type === "website" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="source-max-pages" className="text-xs text-[color:var(--text-secondary)]">
-                Maximum pages
-              </Label>
-              <Input
-                id="source-max-pages"
-                type="number"
-                min={1}
-                max={200}
-                value={maxPages}
-                onChange={(e) => setMaxPages(Number(e.target.value) || 1)}
-              />
-            </div>
-          )}
-
-          <Button
-            onClick={handleSubmit}
-            disabled={
-              isPending ||
-              (type === "file" ? !file : !name.trim()) ||
-              (type === "article" && !content.trim()) ||
-              (needsUrl && !url.trim())
-            }
-            className="w-full rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
-          >
-            {isPending ? "Adding…" : "Add & index"}
-          </Button>
         </div>
       </DialogContent>
     </Dialog>
