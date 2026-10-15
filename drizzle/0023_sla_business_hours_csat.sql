@@ -43,7 +43,3 @@ CREATE TABLE IF NOT EXISTS "conversation_rating" (
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "conversation_rating_product_created_idx" ON "conversation_rating" ("product_id", "created_at");
---> statement-breakpoint
--- Breach-warning sweeper: open first-response targets that nobody was warned about.
-CREATE INDEX IF NOT EXISTS "conversation_sla_due_idx" ON "conversation" ("first_response_due_at")
-  WHERE "first_response_at" IS NULL AND "sla_warning_sent_at" IS NULL;

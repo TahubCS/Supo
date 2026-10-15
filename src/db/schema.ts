@@ -465,9 +465,10 @@ export const conversation = pgTable(
   },
   (table) => [
     uniqueIndex("conversation_public_access_token_idx").on(table.publicAccessToken),
-    index("conversation_sla_due_idx")
+    // Used by the SLA breach-warning sweeper (migration 0023).
+    index("conversation_first_response_due_idx")
       .on(table.firstResponseDueAt)
-      .where(sql`${table.firstResponseAt} IS NULL AND ${table.slaWarningSentAt} IS NULL`),
+      .where(sql`${table.firstResponseAt} IS NULL AND ${table.firstResponseDueAt} IS NOT NULL`),
   ],
 );
 
