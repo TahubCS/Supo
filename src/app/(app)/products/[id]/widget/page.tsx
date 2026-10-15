@@ -35,8 +35,8 @@ export default async function WidgetPage({
       <WidgetConfigurator
         productId={id}
         initialConfig={initialConfig}
-        widgetUrl={`${env.BETTER_AUTH_URL}/widget.js`}
-        apiBaseUrl={env.BETTER_AUTH_URL}
+        widgetUrl={`${env.BETTER_AUTH_URL.replace(/\/+$/, "")}/widget.js`}
+        apiBaseUrl={env.BETTER_AUTH_URL.replace(/\/+$/, "")}
       />
       <WidgetSecuritySettings
         productId={id}

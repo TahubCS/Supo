@@ -190,6 +190,13 @@
       "when": 1778631540000,
       "tag": "0026_email_channel_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1778631600000,
+      "tag": "0027_add_widget_config_allowed_origins",
+      "breakpoints": true
     }
   ]
 }
