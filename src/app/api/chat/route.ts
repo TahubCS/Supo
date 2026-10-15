@@ -1,6 +1,6 @@
 import { streamText } from "ai";
 import { and, desc, eq } from "drizzle-orm";
-import { type NextRequest, NextResponse } from "next/server";
+import { after, type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { conversation, message, product } from "@/db/schema";
@@ -21,6 +21,7 @@ import {
   createConversationPublicAccessToken,
   findWidgetConversation,
 } from "@/lib/widget-conversation-access";
+import { emitConversationEvent, emitWebhookEvent, messageData } from "@/lib/webhooks/service";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
 import { widgetCorsHeaders } from "@/lib/widget-cors";
 import { checkIdentity, normalizeIdentityMode } from "@/lib/widget-identity";
@@ -323,6 +324,14 @@ export async function POST(req: NextRequest) {
     lastMessageAt: now.toISOString(),
     latestMessage: customerMessageEvent,
   }).catch(() => {});
+  after(async () => {
+    if (createdConversation) await emitConversationEvent("conversation.created", convId);
+    await emitWebhookEvent(
+      productId,
+      "message.created",
+      messageData({ id: customerMessageId, conversationId: convId, senderType: "customer", body: trimmedMessage, createdAt: now }),
+    );
+  });
 
   const baseHeaders = new Headers(CORS);
   baseHeaders.set("x-conversation-id", convId);
@@ -491,6 +500,11 @@ export async function POST(req: NextRequest) {
         lastMessageAt: finishAt.toISOString(),
         latestMessage: aiMessageEvent,
       }).catch(() => {});
+      await emitWebhookEvent(
+        productId,
+        "message.created",
+        messageData({ id: aiMessageId, conversationId: convId, senderType: "ai", body: text, createdAt: finishAt }),
+      );
     },
   });
 

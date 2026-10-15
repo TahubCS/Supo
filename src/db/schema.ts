@@ -858,3 +858,70 @@ export const articleVersionRelations = relations(articleVersion, ({ one }) => ({
   article: one(article, { fields: [articleVersion.articleId], references: [article.id] }),
   author: one(user, { fields: [articleVersion.authorId], references: [user.id] }),
 }));
+
+// ── Integrations ────────────────────────────────────────────────────────────
+
+export const apiKey = pgTable(
+  "api_key",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // First characters of the key, shown in the UI to identify it.
+    prefix: text("prefix").notNull(),
+    // SHA-256 of the full key; the key itself is never stored.
+    keyHash: text("key_hash").notNull(),
+    scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
+    createdById: text("created_by_id").references(() => user.id, { onDelete: "set null" }),
+    lastUsedAt: timestamp("last_used_at"),
+    expiresAt: timestamp("expires_at"),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("api_key_hash_idx").on(table.keyHash), index("api_key_product_idx").on(table.productId)],
+);
+
+export const webhookEndpoint = pgTable(
+  "webhook_endpoint",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    description: text("description"),
+    // HMAC signing secret shared with the receiver.
+    secret: text("secret").notNull(),
+    events: text("events").array().notNull().default(sql`'{}'::text[]`),
+    enabled: boolean("enabled").notNull().default(true),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    disabledReason: text("disabled_reason"),
+    createdById: text("created_by_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [index("webhook_endpoint_product_idx").on(table.productId)],
+);
+
+export const webhookDelivery = pgTable(
+  "webhook_delivery",
+  {
+    id: text("id").primaryKey(),
+    endpointId: text("endpoint_id")
+      .notNull()
+      .references(() => webhookEndpoint.id, { onDelete: "cascade" }),
+    event: text("event").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").notNull().default("pending"), // "pending" | "success" | "failed"
+    attempts: integer("attempts").notNull().default(0),
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    error: text("error"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at").notNull(),
+    deliveredAt: timestamp("delivered_at"),
+  },
+  (table) => [index("webhook_delivery_endpoint_created_idx").on(table.endpointId, table.createdAt)],
+);

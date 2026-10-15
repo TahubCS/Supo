@@ -44,6 +44,12 @@ export async function getHelpCenterForProduct(productId: string) {
   return db.query.helpCenter.findFirst({ where: eq(helpCenter.productId, productId) });
 }
 
+/** Resolves public article URLs for a product (null while the help center is off). */
+export async function articleUrlFor(productId: string): Promise<(slug: string) => string | null> {
+  const center = await getHelpCenterForProduct(productId);
+  return (slug: string) => (center?.enabled ? helpCenterUrl(center.slug, slug) : null);
+}
+
 export type ArticleListItem = {
   id: string;
   slug: string;

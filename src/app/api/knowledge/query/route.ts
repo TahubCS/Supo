@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
+import { authenticateApi, isApiContext } from "@/lib/api/auth";
+import { readApiKey } from "@/lib/api/keys";
 import { isAuthorizedInternalRequest } from "@/lib/internal-auth";
 import { geminiGenerate } from "@/lib/knowledge/ai";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
@@ -8,10 +10,16 @@ import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 
 export const maxDuration = 60;
 
-// Internal knowledge Q&A endpoint (server-to-server). Uses the same retrieval
-// and prompt as the widget.
+// Legacy knowledge Q&A endpoint. Prefer POST /api/v1/knowledge/search with a
+// product API key. Accepts either an API key (knowledge:read, product taken
+// from the key) or the internal secret with an explicit productId.
 export async function POST(req: NextRequest) {
-  if (!isAuthorizedInternalRequest(req.headers)) {
+  let keyProductId: string | null = null;
+  if (readApiKey(req.headers)) {
+    const ctx = await authenticateApi(req, "knowledge:read");
+    if (!isApiContext(ctx)) return ctx;
+    keyProductId = ctx.productId;
+  } else if (!isAuthorizedInternalRequest(req.headers)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -22,7 +30,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const productId = body.productId?.trim();
+  const productId = keyProductId ?? body.productId?.trim();
   const question = body.question?.trim().slice(0, 2000);
   if (!productId || !question) {
     return NextResponse.json({ error: "productId and question required" }, { status: 400 });

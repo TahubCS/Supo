@@ -23,7 +23,8 @@ type QuotaName =
   | "messages.poll.conversation.minute"
   | "messages.poll.ip.minute"
   | "widget.rating.conversation"
-  | "help.feedback.article.hour";
+  | "help.feedback.article.hour"
+  | "api.key.minute";
 
 type QuotaConfig = {
   limit: number;
@@ -67,6 +68,7 @@ const quotaConfigs: Record<QuotaName, QuotaConfig> = {
   "messages.poll.ip.minute": { limit: 120, window: "1 m" },
   "widget.rating.conversation": { limit: 10, window: "1 h" },
   "help.feedback.article.hour": { limit: 1, window: "1 h" },
+  "api.key.minute": { limit: 600, window: "1 m" },
 };
 const quotaLimiters = new Map<QuotaName, Ratelimit>();
 

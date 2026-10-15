@@ -6,14 +6,9 @@ import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Input } from "@/components/ui/input";
+import type { ConversationPriority } from "@/lib/conversations/fields";
 
-import {
-  getCustomerProfile,
-  setConversationPriority,
-  setConversationTags,
-  type ConversationPriority,
-  type CustomerProfile,
-} from "./actions";
+import { getCustomerProfile, setConversationPriority, setConversationTags, type CustomerProfile } from "./actions";
 import type { ConversationWithDetails } from "./types";
 
 const PRIORITY_STYLES: Record<string, string> = {

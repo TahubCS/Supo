@@ -11,6 +11,7 @@ import {
 import { enqueueAndKick } from "@/lib/jobs/queue";
 import { isWithinBusinessHours } from "@/lib/sla/hours";
 import { applySlaTargets, getBusinessHours } from "@/lib/sla/service";
+import { emitConversationEvent } from "@/lib/webhooks/service";
 
 import { HANDOFF_REASON_LABELS } from "./policy";
 import { pickRoundRobinAgent } from "./routing";
@@ -198,9 +199,14 @@ export async function escalateConversation({
   });
 
   await postSystemMessage({ orgId, productId, conversationId, body: handoffNotice(availability, followUpEmail) });
+  await emitConversationEvent("conversation.escalated", conversationId, { reason, availability });
 
   const assignee = availability === "online" ? await autoAssign(orgId, productId, conversationId) : null;
   if (assignee) {
+    await emitConversationEvent("conversation.assigned", conversationId, {
+      assignee: { id: assignee.id, name: assignee.name },
+      assignedBy: "routing",
+    });
     await postSystemMessage({ orgId, productId, conversationId, body: `${assignee.name} joined the conversation.` });
     await Promise.allSettled([
       publishToConversation(orgId, productId, conversationId, "escalation_update", {

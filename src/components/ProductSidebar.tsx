@@ -10,6 +10,7 @@ import {
   LogOut,
   MessageSquare,
   MousePointerClick,
+  Plug,
   SlidersHorizontal,
   Users,
 } from "lucide-react";
@@ -55,6 +56,7 @@ export function ProductSidebar({
     { href: `${base}/knowledge`, icon: BookOpen, label: "Knowledge", roles: ["admin", "developer"] },
     { href: `${base}/help-center`, icon: LifeBuoy, label: "Help center", roles: ["admin", "developer"] },
     { href: `${base}/widget`, icon: Code2, label: "Widget", roles: ["admin", "developer"] },
+    { href: `${base}/integrations`, icon: Plug, label: "Integrations", roles: ["admin", "developer"] },
     { href: `${base}/docs`, icon: FileText, label: "Setup guide", roles: ["admin", "developer"] },
     { href: `${base}/analytics`, icon: BarChart2, label: "Analytics", roles: ["admin"] },
     ...(isWorkspaceOwner

@@ -4,6 +4,24 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### API and webhooks
+
+- **REST API v1** (`/api/v1`): conversations (list with cursor pagination, get, update status/priority/tags), messages (list, post replies or internal notes), customers (list, upsert, update), knowledge sources (list, add, re-index, delete) and search (with optional AI answer), and help center articles (CRUD and publish). See `docs/API.md`.
+- **API keys:**
+  - product-scoped, with per-scope permissions and optional expiry
+  - stored as SHA-256 hashes and shown once
+  - revocable, with last-used tracking and a per-key rate limit
+- `/api/knowledge/query` also accepts API keys. The shared internal secret still works for existing callers.
+- **Outgoing webhooks:**
+  - events: `conversation.created`, `.escalated`, `.assigned` and `.resolved`, plus `message.created`, `rating.created` and `article.published`
+  - HMAC-SHA256 signatures with a timestamp
+  - retries through the job queue (6 attempts, about 5 hours)
+  - a delivery log with payloads, responses and redelivery, plus a test event
+  - automatic pause after 15 consecutive failures
+  - SSRF-safe delivery that doesn't follow redirects
+- **Integrations** page for keys and webhooks.
+- Migration `0025_api_keys_webhooks` adds `api_key`, `webhook_endpoint` and `webhook_delivery`.
+
 ### Help center
 
 - **Public help center** at `/help/{slug}` with categories, search, article pages, helpful/not-helpful voting, related articles, SEO metadata, JSON-LD, `sitemap.xml` and `robots.txt`.

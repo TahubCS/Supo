@@ -10,7 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-import { addSource, uploadSourceFile, type AddSourceInput } from "./actions";
+import type { AddSourceInput } from "@/lib/knowledge/sources";
+
+import { addSource, uploadSourceFile } from "./actions";
 
 // "file" is parsed server-side and stored as an article source.
 type SourceType = AddSourceInput["type"] | "file";

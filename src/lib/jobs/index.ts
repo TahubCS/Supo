@@ -6,6 +6,7 @@ import { ingestSource, syncSourceIfChanged } from "@/lib/knowledge/ingest";
 // Side-effect import: registers conversation/handoff job handlers.
 import "@/lib/handoff/jobs";
 import "@/lib/sla/jobs";
+import "@/lib/webhooks/jobs";
 
 import { enqueueAndKick, registerJobHandler } from "./queue";
 

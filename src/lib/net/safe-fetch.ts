@@ -251,3 +251,49 @@ export async function safeFetch(raw: string, options: SafeFetchOptions = {}): Pr
 
   throw new SafeFetchError("Too many redirects");
 }
+
+export type SafePostResult = { status: number; body: string; durationMs: number };
+
+/**
+ * POSTs to a user-supplied URL (webhooks) through the same SSRF guard.
+ * Redirects are not followed and non-2xx responses are returned, not thrown.
+ */
+export async function safePost(
+  raw: string,
+  { body, headers, timeoutMs = 10_000, maxResponseBytes = 4096 }: {
+    body: string;
+    headers: Record<string, string>;
+    timeoutMs?: number;
+    maxResponseBytes?: number;
+  },
+): Promise<SafePostResult> {
+  const url = await assertPublicUrl(raw);
+  const started = Date.now();
+  let response: Response;
+  try {
+    response = (await undiciFetch(url, {
+      method: "POST",
+      redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { "User-Agent": USER_AGENT, "Content-Type": "application/json", ...headers },
+      body,
+      dispatcher: getGuardedAgent(),
+    })) as unknown as Response;
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new SafeFetchError(`Timed out after ${timeoutMs / 1000}s`);
+    }
+    const cause = error instanceof Error && error.cause instanceof SafeFetchError ? error.cause : null;
+    if (cause) throw cause;
+    throw new SafeFetchError(`Could not connect to ${url.host}`);
+  }
+  let text = "";
+  try {
+    const bytes = await readLimited(response, maxResponseBytes);
+    text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  } catch {
+    // Oversized responses are fine; only the status matters.
+    await response.body?.cancel().catch(() => {});
+  }
+  return { status: response.status, body: text, durationMs: Date.now() - started };
+}
