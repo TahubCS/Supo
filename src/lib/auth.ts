@@ -11,10 +11,42 @@ import { env } from "@/lib/env";
 import { escapeHtml } from "@/lib/html";
 
 const resend = new Resend(env.RESEND_API_KEY);
-const trustedOrigins =
-  process.env.NODE_ENV === "production"
-    ? [env.BETTER_AUTH_URL]
-    : [env.BETTER_AUTH_URL, "http://localhost:3000"];
+function normalizeOrigin(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url.trim().replace(/\/+$/, "");
+  }
+}
+
+const configuredOrigin = normalizeOrigin(env.BETTER_AUTH_URL);
+
+function resolveBaseURL(): string {
+  if (process.env.NODE_ENV === "production") {
+    if (!configuredOrigin || configuredOrigin.includes("localhost")) {
+      return "https://supo.muhammadtahubkhatri.dev";
+    }
+    return configuredOrigin;
+  }
+  return configuredOrigin ?? "http://localhost:3000";
+}
+
+const trustedOrigins = Array.from(
+  new Set(
+    [
+      resolveBaseURL(),
+      configuredOrigin,
+      "https://supo.muhammadtahubkhatri.dev",
+      "https://*.vercel.app",
+      process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : null,
+      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+      ...(process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000"]),
+    ].filter(Boolean) as string[],
+  ),
+);
 
 function shouldSuppressInfraOAuthStateLog(level: string, message: string, args: unknown[]) {
   if (level !== "error" || message !== "Failed to parse state") return false;
@@ -59,7 +91,7 @@ const supoUserRole = adminAc.newRole({
 export const auth = betterAuth({
   appName: "Supo",
   secret: env.BETTER_AUTH_SECRET,
-  baseURL: env.BETTER_AUTH_URL,
+  baseURL: resolveBaseURL(),
   trustedOrigins,
   logger: {
     level: "warn",

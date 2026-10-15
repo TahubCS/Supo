@@ -51,9 +51,24 @@ const AUTH_POST_PATHS = new Set([
   "/api/auth/request-password-reset",
   "/api/auth/send-verification-email",
 ]);
+
+function normalizeOrigin(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return url.trim().replace(/\/+$/, "");
+  }
+}
+
 const trustedOrigins = new Set(
   [
-    process.env.BETTER_AUTH_URL,
+    process.env.BETTER_AUTH_URL ? normalizeOrigin(process.env.BETTER_AUTH_URL) : null,
+    "https://supo.muhammadtahubkhatri.dev",
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : null,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
     ...(isProduction ? [] : ["http://localhost:3000"]),
   ].filter(Boolean) as string[],
 );
@@ -148,7 +163,17 @@ function jsonResponse(
 
 function isAllowedAuthOrigin(req: NextRequest): boolean {
   const origin = req.headers.get("origin");
-  return Boolean(origin && trustedOrigins.has(origin));
+  if (!origin) return false;
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (trustedOrigins.has(normalized)) return true;
+  try {
+    const url = new URL(normalized);
+    if (url.hostname.endsWith(".vercel.app")) return true;
+  } catch {
+    return false;
+  }
+  return false;
 }
 
 function getContentTypeMediaType(req: NextRequest): string {

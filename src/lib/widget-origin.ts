@@ -7,9 +7,15 @@ import { isOriginAllowed, widgetCorsHeaders } from "@/lib/widget-cors";
 
 function trustedOrigins(): string[] {
   try {
-    return [new URL(env.BETTER_AUTH_URL).origin];
+    return Array.from(
+      new Set(
+        [new URL(env.BETTER_AUTH_URL).origin, "https://supo.muhammadtahubkhatri.dev"].filter(
+          Boolean,
+        ),
+      ),
+    );
   } catch {
-    return [];
+    return ["https://supo.muhammadtahubkhatri.dev"];
   }
 }
 

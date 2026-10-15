@@ -3,6 +3,8 @@
 import { Github } from "lucide-react";
 import { useState } from "react";
 
+import { toast } from "sonner";
+
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 
@@ -24,7 +26,16 @@ export function SocialButtons({ callbackURL = "/dashboard" }: { callbackURL?: st
 
   const handleSocial = async (provider: Provider) => {
     setLoading(provider);
-    await authClient.signIn.social({ provider, callbackURL });
+    try {
+      const res = await authClient.signIn.social({ provider, callbackURL });
+      if (res?.error) {
+        toast.error(res.error.message || `Failed to sign in with ${provider}`);
+        setLoading(null);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Failed to sign in with ${provider}`);
+      setLoading(null);
+    }
   };
 
   return (
