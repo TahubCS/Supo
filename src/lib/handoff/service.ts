@@ -83,29 +83,35 @@ async function autoAssign(
   const online = await getOnlineAgentUserIds(orgId, productId);
   if (!online || online.length === 0) return null;
 
-  const loads = await db
-    .select({ assigneeId: conversation.assigneeId, count: sql<number>`count(*)::int` })
-    .from(conversation)
-    .where(
-      and(
-        eq(conversation.productId, productId),
-        eq(conversation.escalationStatus, "active"),
-        inArray(conversation.assigneeId, online),
-      ),
-    )
-    .groupBy(conversation.assigneeId);
-  const counts = Object.fromEntries(loads.map((row) => [row.assigneeId ?? "", Number(row.count)]));
-  // Shuffle so equally loaded agents share the work.
-  const shuffled = [...online].sort(() => Math.random() - 0.5);
-  const chosen = pickRoundRobinAgent(shuffled, counts, settings.maxConcurrentChats);
-  if (!chosen) return null;
+  // Select-and-assign under a per-product advisory lock so concurrent
+  // escalations can't all pick the same agent and exceed the cap.
+  const chosen = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`routing:${productId}`}))`);
+    const loads = await tx
+      .select({ assigneeId: conversation.assigneeId, count: sql<number>`count(*)::int` })
+      .from(conversation)
+      .where(
+        and(
+          eq(conversation.productId, productId),
+          eq(conversation.escalationStatus, "active"),
+          inArray(conversation.assigneeId, online),
+        ),
+      )
+      .groupBy(conversation.assigneeId);
+    const counts = Object.fromEntries(loads.map((row) => [row.assigneeId ?? "", Number(row.count)]));
+    // Shuffle so equally loaded agents share the work.
+    const shuffled = [...online].sort(() => Math.random() - 0.5);
+    const pick = pickRoundRobinAgent(shuffled, counts, settings.maxConcurrentChats);
+    if (!pick) return null;
 
-  const assigned = await db
-    .update(conversation)
-    .set({ assigneeId: chosen, escalationStatus: "active", updatedAt: new Date() })
-    .where(and(eq(conversation.id, conversationId), isNull(conversation.assigneeId)))
-    .returning({ id: conversation.id });
-  if (assigned.length === 0) return null;
+    const assigned = await tx
+      .update(conversation)
+      .set({ assigneeId: pick, escalationStatus: "active", updatedAt: new Date() })
+      .where(and(eq(conversation.id, conversationId), isNull(conversation.assigneeId)))
+      .returning({ id: conversation.id });
+    return assigned.length > 0 ? pick : null;
+  });
+  if (!chosen) return null;
 
   const agent = await db.query.user.findFirst({ where: eq(user.id, chosen), columns: { id: true, name: true } });
   return agent ?? { id: chosen, name: "A teammate" };

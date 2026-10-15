@@ -1,6 +1,28 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { assertPublicUrl, isPrivateAddress } from "@/lib/net/safe-fetch";
+vi.mock("node:dns", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:dns")>();
+  return {
+    ...actual,
+    lookup: (
+      hostname: string,
+      _options: unknown,
+      callback: (error: Error | null, addresses: { address: string; family: number }[]) => void,
+    ) => {
+      const table: Record<string, { address: string; family: number }[]> = {
+        "rebind.test": [{ address: "127.0.0.1", family: 4 }],
+        "mixed.test": [
+          { address: "93.184.216.34", family: 4 },
+          { address: "10.0.0.5", family: 4 },
+        ],
+        "public.test": [{ address: "93.184.216.34", family: 4 }],
+      };
+      callback(null, table[hostname] ?? []);
+    },
+  };
+});
+
+const { assertPublicUrl, guardedLookup, isPrivateAddress } = await import("@/lib/net/safe-fetch");
 
 describe("isPrivateAddress", () => {
   it.each([
@@ -41,5 +63,26 @@ describe("assertPublicUrl", () => {
 
   it("accepts public IP literals without DNS", async () => {
     await expect(assertPublicUrl("https://1.1.1.1/")).resolves.toBeInstanceOf(URL);
+  });
+});
+
+describe("guardedLookup (connection-time check)", () => {
+  function resolve(hostname: string, all: boolean) {
+    return new Promise<{ error: Error | null; address: unknown }>((done) => {
+      guardedLookup(hostname, { all } as never, (error, address) => done({ error, address }));
+    });
+  }
+
+  it("refuses to connect when a hostname resolves to an internal address", async () => {
+    expect((await resolve("rebind.test", false)).error?.message).toMatch(/not reachable/);
+    expect((await resolve("mixed.test", true)).error?.message).toMatch(/not reachable/);
+  });
+
+  it("returns public addresses in the shape the caller asked for", async () => {
+    expect(await resolve("public.test", false)).toEqual({ error: null, address: "93.184.216.34" });
+    expect(await resolve("public.test", true)).toEqual({
+      error: null,
+      address: [{ address: "93.184.216.34", family: 4 }],
+    });
   });
 });

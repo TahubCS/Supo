@@ -9,12 +9,16 @@ const DATABASE_URL = process.env.TEST_DATABASE_URL;
 if (DATABASE_URL) process.env.DATABASE_URL = DATABASE_URL;
 
 vi.mock("next/server", () => ({ after: (fn: () => unknown) => void fn() }));
+
+// Lets a test run code in the middle of an ingest (between loading content and
+// swapping chunks), e.g. to simulate an edit landing mid-run.
+const hooks: { duringEmbed: (() => Promise<void>) | null } = { duringEmbed: null };
 vi.mock("@/lib/knowledge/ai", () => ({
   geminiEmbedQuery: async (text: string) => ({ embedding: fakeEmbedding(text), model: "fake-embed" }),
-  geminiEmbedManyWithModel: async (texts: string[]) => ({
-    embeddings: texts.map(fakeEmbedding),
-    model: "fake-embed",
-  }),
+  geminiEmbedManyWithModel: async (texts: string[]) => {
+    if (hooks.duringEmbed) await hooks.duringEmbed();
+    return { embeddings: texts.map(fakeEmbedding), model: "fake-embed" };
+  },
   geminiGenerate: async () => "stub",
 }));
 
@@ -153,5 +157,34 @@ describe.skipIf(!DATABASE_URL)("knowledge pipeline (database)", () => {
 
     const job = await mod.db.query.backgroundJob.findFirst({ where: eq(mod.schema.backgroundJob.id, first) });
     expect(job?.status).toBe("failed");
+  });
+
+  it("does not overwrite an edit that lands while an ingest is running", async () => {
+    const { eq, sql } = await import("drizzle-orm");
+    const sourceId = await addArticle(productId, "Returns", "Returns are accepted within fourteen days of delivery for unused items.");
+
+    hooks.duringEmbed = async () => {
+      hooks.duringEmbed = null;
+      await mod.db
+        .update(mod.schema.knowledgeSource)
+        .set({
+          content: "Returns are accepted within sixty days of delivery, no questions asked.",
+          revision: sql`${mod.schema.knowledgeSource.revision} + 1`,
+        })
+        .where(eq(mod.schema.knowledgeSource.id, sourceId));
+    };
+    const stale = await mod.jobs.enqueueJob("knowledge.ingest", { sourceId }, { dedupeKey: `knowledge.ingest:${sourceId}` });
+    await mod.jobs.runJobNow(stale);
+
+    // The stale run must not have replaced the chunks with old content…
+    let chunks = await mod.db.query.knowledgeChunk.findMany({ where: eq(mod.schema.knowledgeChunk.sourceId, sourceId) });
+    expect(chunks.every((c) => !c.content.includes("sixty"))).toBe(true);
+
+    // …and the follow-up job indexes the edited content.
+    const followUp = await mod.jobs.enqueueJob("knowledge.ingest", { sourceId }, { dedupeKey: `knowledge.ingest:${sourceId}` });
+    expect(followUp).not.toBe(stale);
+    await mod.jobs.runJobNow(followUp);
+    chunks = await mod.db.query.knowledgeChunk.findMany({ where: eq(mod.schema.knowledgeChunk.sourceId, sourceId) });
+    expect(chunks.some((c) => c.content.includes("sixty days"))).toBe(true);
   });
 });

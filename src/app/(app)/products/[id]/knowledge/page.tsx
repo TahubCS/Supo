@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { db } from "@/db";
 import { knowledgeSource, knowledgeSuggestion } from "@/db/schema";
+import { drainSoon } from "@/lib/jobs";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
 import { KnowledgeBase } from "./KnowledgeBase";
@@ -19,6 +20,7 @@ export default async function KnowledgePage({
 
   const access = await getProductAccess(id);
   if (!access || !canAccessProductCapability(access.role, "knowledge")) notFound();
+  drainSoon();
 
   const sources = await db.query.knowledgeSource.findMany({
     where: eq(knowledgeSource.productId, id),

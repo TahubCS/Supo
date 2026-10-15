@@ -40,9 +40,15 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   let needsEmail = false;
   let agentTyping: string | null = null;
   let typingTimer: ReturnType<typeof setTimeout> | null = null;
+  const emittedMessageIds = new Set<string>();
 
   const unsubscribers = [
     headless.on("message", (message) => {
+      // Public `runtime.on("message")`: each server message exactly once.
+      if (!message.id || !emittedMessageIds.has(message.id)) {
+        if (message.id) emittedMessageIds.add(message.id);
+        emitter.emit("message", message);
+      }
       messages = reconcileMessage(messages, message);
       if (message.role === "agent") {
         clearAgentTyping();
@@ -323,6 +329,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
       connection = "idle";
       escalationStatus = null;
       needsEmail = false;
+      emittedMessageIds.clear();
       clearAgentTyping();
       render();
       emitState();

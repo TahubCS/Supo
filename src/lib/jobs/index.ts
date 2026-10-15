@@ -8,7 +8,7 @@ import "@/lib/handoff/jobs";
 
 import { enqueueAndKick, registerJobHandler } from "./queue";
 
-export { drainJobs, enqueueAndKick, enqueueJob, kickJob, runJobNow } from "./queue";
+export { drainJobs, drainSoon, enqueueAndKick, enqueueJob, kickJob, runJobNow } from "./queue";
 
 export const JOB_TYPES = {
   knowledgeIngest: "knowledge.ingest",

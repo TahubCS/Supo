@@ -4,6 +4,21 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Review follow-ups
+
+- **Migrations:** `0017` no longer fails on databases that are missing the knowledge tables; their indexes are created by `0018` instead.
+- **Knowledge jobs:**
+  - Failed indexing attempts retry within the same invocation (30 s backoff), and dashboard traffic drains due jobs, so a transient error no longer waits for the daily cron.
+  - Editing a source while it is being indexed can no longer be overwritten by the older run: sources have a `revision`, and job de-duplication applies only to queued jobs (migration `0022`).
+- **SSRF:** outbound fetches validate DNS at connection time (undici `connect.lookup`), closing the DNS-rebinding gap.
+- **Widget origins:** default ports (`:443`, `:80`) are normalized, so `https://app.example.com:443` matches the browser's origin.
+- **Round robin:** assignment is serialized per product, so bursts of escalations can't exceed an agent's cap.
+- **Inbox:**
+  - Snoozed conversations wake on time without a reload.
+  - Server search matches tags.
+  - Bulk resolve no longer hides conversations that failed to resolve.
+- **Widget SDK:** `runtime.on("message")` fires for server messages (`0.1.0-alpha.7`).
+
 ### Agent workspace
 
 - **Internal notes:** an amber "Internal note" composer mode. Notes travel on the agents-only inbox channel and are never sent to the widget, returned by polling or shown to the AI.

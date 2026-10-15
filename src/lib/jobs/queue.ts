@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { after } from "next/server";
 
 import { db } from "@/db";
@@ -72,12 +72,10 @@ export async function enqueueJob(
 
   if (inserted.length > 0) return inserted[0].id;
 
-  // An active job with the same dedupe key already exists; reuse it.
+  // A queued job with the same dedupe key already exists; reuse it. (Running
+  // jobs are not de-duplicated, so changes made mid-run get a follow-up job.)
   const existing = await db.query.backgroundJob.findFirst({
-    where: and(
-      eq(backgroundJob.dedupeKey, options.dedupeKey ?? ""),
-      inArray(backgroundJob.status, ["queued", "running"]),
-    ),
+    where: and(eq(backgroundJob.dedupeKey, options.dedupeKey ?? ""), eq(backgroundJob.status, "queued")),
     columns: { id: true },
   });
   if (!existing) throw new Error(`Could not enqueue ${type} job`);
@@ -139,11 +137,47 @@ async function executeJob(job: JobRow): Promise<"done" | "retry" | "failed"> {
   }
 }
 
-/** Claims and runs one specific job if it is due. */
+// Retries short enough to wait for inside the same invocation (the first
+// backoff step is 30s), and the total time we allow ourselves to spend.
+const INLINE_RETRY_MAX_DELAY_MS = 30_000;
+const INLINE_RETRY_BUDGET_MS = 75_000;
+
+/**
+ * Claims and runs one specific job if it is due. A failed attempt whose retry
+ * is due soon is retried in the same invocation, so transient errors don't
+ * wait for the next cron run.
+ */
 export async function runJobNow(jobId: string): Promise<void> {
   await ensureHandlersLoaded();
-  const job = await claimJob(jobId);
-  if (job) await executeJob(job);
+  const startedAt = Date.now();
+  let job = await claimJob(jobId);
+  while (job) {
+    const outcome = await executeJob(job);
+    if (outcome !== "retry") return;
+    const delay = retryDelayMs(job.attempts);
+    if (delay > INLINE_RETRY_MAX_DELAY_MS || Date.now() - startedAt + delay > INLINE_RETRY_BUDGET_MS) return;
+    await new Promise((resolve) => setTimeout(resolve, delay + 250));
+    job = await claimJob(jobId);
+  }
+}
+
+let lastOpportunisticDrain = 0;
+
+/**
+ * Runs a small batch of due jobs after the current response. Called from
+ * frequently hit dashboard requests (e.g. indexing status polling) so the
+ * queue keeps moving between cron runs. Throttled per server instance.
+ */
+export function drainSoon({ maxJobs = 2, deadlineMs = 20_000, minIntervalMs = 15_000 } = {}): void {
+  const now = Date.now();
+  if (now - lastOpportunisticDrain < minIntervalMs) return;
+  lastOpportunisticDrain = now;
+  const run = () => drainJobs({ maxJobs, deadlineMs }).catch((error) => console.error("[jobs] drain failed", error));
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 /**

@@ -523,6 +523,9 @@ export const knowledgeSource = pgTable("knowledge_source", {
   enabled: boolean("enabled").notNull().default(true),
   indexingStartedAt: timestamp("indexing_started_at"),
   pageCount: integer("page_count").notNull().default(0),
+  // Bumped on every edit/re-index request; an ingest only swaps chunks if the
+  // revision it started from is still current.
+  revision: integer("revision").notNull().default(0),
   // Crawl settings for website sources, e.g. { maxPages: 50 }.
   settings: jsonb("settings").$type<KnowledgeSourceSettings>(),
   createdAt: timestamp("created_at").notNull(),
@@ -640,9 +643,9 @@ export const backgroundJob = pgTable(
   },
   (table) => [
     index("background_job_status_run_at_idx").on(table.status, table.runAt),
-    uniqueIndex("background_job_active_dedupe_idx")
+    uniqueIndex("background_job_queued_dedupe_idx")
       .on(table.dedupeKey)
-      .where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} IN ('queued', 'running')`),
+      .where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} = 'queued'`),
   ],
 );
 
