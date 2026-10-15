@@ -9,6 +9,7 @@ import {
   FileText,
   Github,
   Globe,
+  Lock,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -35,6 +36,7 @@ import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import type { KnowledgeSourceSettings } from "@/db/schema";
 
 import {
   deleteSource,
@@ -56,7 +58,8 @@ export type Source = {
   errorMessage: string | null;
   chunkCount: number;
   pageCount: number;
-  settings: { maxPages?: number } | null;
+  settings: KnowledgeSourceSettings | null;
+  githubRepoId: number | null;
   lastCheckedAt: Date | null;
   updatedAt: Date;
 };
@@ -117,13 +120,14 @@ function EditSourceDialog({
   const [isPending, startTransition] = useTransition();
   const isText = source.type === "article" || source.type === "conversation";
   const isWebsite = source.type === "website" || source.type === "sitemap";
+  const isGitHubApp = source.githubRepoId !== null;
 
   function handleSave() {
     startTransition(async () => {
       try {
         await updateSource(source.id, {
           name,
-          url: isText ? undefined : url,
+          url: isText || isGitHubApp ? undefined : url,
           content: isText ? content : undefined,
           maxPages: isWebsite ? maxPages : undefined,
         });
@@ -158,7 +162,7 @@ function EditSourceDialog({
                 className="resize-y text-sm"
               />
             </div>
-          ) : (
+          ) : isGitHubApp ? null : (
             <div className="space-y-1.5">
               <Label htmlFor={`url-${source.id}`} className="text-xs text-[color:var(--text-secondary)]">URL</Label>
               <Input id={`url-${source.id}`} type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -255,6 +259,7 @@ function SourceCard({ source }: { source: Source }) {
   const [viewing, setViewing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const autoSync = ["url", "sitemap", "website", "github"].includes(source.type);
+  const github = source.githubRepoId !== null ? source.settings?.github : undefined;
 
   function run(action: () => Promise<void>, success?: string) {
     startTransition(async () => {
@@ -299,7 +304,7 @@ function SourceCard({ source }: { source: Source }) {
         {autoSync && (
           <span className="flex items-center gap-1 text-[10px] text-[color:var(--text-tertiary)]">
             <RotateCcw className="size-2.5" />
-            Daily sync
+            {github ? "Syncs on push" : "Daily sync"}
           </span>
         )}
         {source.status === "indexed" && (
@@ -309,6 +314,16 @@ function SourceCard({ source }: { source: Source }) {
           </span>
         )}
       </div>
+
+      {github && (
+        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-[color:var(--text-tertiary)]">
+          {github.private && <Lock className="size-3" />}
+          <span className="truncate">{github.fullName}</span>
+          <span>· {github.branch ?? "default branch"}</span>
+          {github.lastCommitSha && <span className="font-mono">· {github.lastCommitSha.slice(0, 7)}</span>}
+          {github.includePaths.length > 0 && <span>· {github.includePaths.join(", ")}</span>}
+        </p>
+      )}
 
       {source.errorMessage && (
         <p

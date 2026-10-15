@@ -72,7 +72,9 @@ drizzle/                           SQL migrations
 
 ## Knowledge Base
 
-**Sources:** articles (markdown), single pages, whole websites (crawled via `robots.txt` / `sitemap.xml`, sitemap indexes, or by following links under the start URL; up to 200 pages), GitHub repositories (README and `docs/`), and approved answers learned from conversations. URL, website and GitHub sources re-sync daily and are only re-embedded when their content changes.
+**Sources:** articles (markdown), single pages, whole websites (crawled via `robots.txt` / `sitemap.xml`, sitemap indexes, or by following links under the start URL; up to 200 pages), GitHub repositories, and approved answers learned from conversations. URL, website and GitHub sources re-sync daily and are only re-embedded when their content changes; unchanged pages and files reuse their stored embeddings.
+
+**GitHub App:** repositories connected through the Supo GitHub App (read-only, private repositories included) index README, changelog and documentation files anywhere in the repository (Markdown, MDX, reStructuredText, AsciiDoc), plus release notes and optionally recent issues. Source code, tests and dependencies are skipped. Pushes to the tracked branch, releases and issue changes re-index through the GitHub webhook, and only changed files are re-embedded. Answers from private repositories never link customers to the files. Public repositories can still be added by URL without the app.
 
 **Pipeline** (`src/lib/knowledge/*`):
 
@@ -174,7 +176,8 @@ Paid WAF, CAPTCHA, bot-management products, and domain-based email hardening are
 - Neon Postgres database
 - Upstash Redis database
 - Google OAuth app
-- GitHub OAuth app
+- GitHub OAuth app (sign-in)
+- GitHub App (optional, connects repositories to the knowledge base)
 - Google Gemini API key
 - Resend API key
 - Ably API key for realtime features
@@ -190,6 +193,7 @@ Notes:
 - `BETTER_AUTH_ADMIN_USER_IDS` should contain only the trusted owner/admin Better Auth user id.
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
 - The email channel is optional. Set `INBOUND_EMAIL_DOMAIN` (a receiving domain in Resend) and `RESEND_WEBHOOK_SECRET` (the signing secret of a Resend webhook for `email.received` pointed at `/api/inbound/email`).
+- The GitHub App is optional. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM, multi-line or with `\n` escapes) and `GITHUB_APP_WEBHOOK_SECRET`. Configure the app with callback URL `/api/integrations/github/callback` and "Request user authorization (OAuth) during installation" enabled, webhook URL `/api/webhooks/github`, read-only Contents, Metadata and Issues permissions, and the Push, Release, Repository and Issues events. It is separate from the GitHub OAuth app used for sign-in.
 - `ABLY_API_KEY` enables realtime inbox/widget updates. The widget keeps polling as a fallback if Ably is absent.
 - `CRON_SECRET` authorizes Vercel Cron and internal job routes. Vercel sends it as `Authorization: Bearer $CRON_SECRET` automatically when the variable is set on the project.
 - `DATABASE_SSL=disable` (or `sslmode=disable` in the URL) turns off TLS for a local Postgres.

@@ -76,4 +76,25 @@ export const env = {
   get RESEND_WEBHOOK_SECRET() {
     return optionalEnv("RESEND_WEBHOOK_SECRET");
   },
+  // GitHub App used to connect repositories to the knowledge base. Separate from
+  // the GitHub OAuth app used for sign-in (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET).
+  get GITHUB_APP_ID() {
+    return optionalEnv("GITHUB_APP_ID");
+  },
+  get GITHUB_APP_SLUG() {
+    return optionalEnv("GITHUB_APP_SLUG");
+  },
+  get GITHUB_APP_CLIENT_ID() {
+    return optionalEnv("GITHUB_APP_CLIENT_ID");
+  },
+  get GITHUB_APP_CLIENT_SECRET() {
+    return optionalEnv("GITHUB_APP_CLIENT_SECRET");
+  },
+  // PEM private key. Escaped "\n" sequences (single-line env values) are accepted.
+  get GITHUB_APP_PRIVATE_KEY() {
+    return optionalEnv("GITHUB_APP_PRIVATE_KEY")?.replace(/\\n/g, "\n");
+  },
+  get GITHUB_APP_WEBHOOK_SECRET() {
+    return optionalEnv("GITHUB_APP_WEBHOOK_SECRET");
+  },
 };

@@ -49,3 +49,42 @@ export function validateSourceInput(input: AddSourceInput) {
       : null;
   return { name, url, content: null, settings };
 }
+
+export type AddGitHubSourceInput = {
+  installationId: number;
+  repoId: number;
+  name?: string;
+  branch?: string;
+  includePaths?: string[];
+  excludePaths?: string[];
+  includeReleases?: boolean;
+  includeIssues?: boolean;
+};
+
+const MAX_PATH_FILTERS = 20;
+
+function validatePathFilters(values: string[] | undefined, label: string): string[] {
+  const paths = (values ?? []).map((value) => value.trim().replace(/^\.?\/+/, "").replace(/\/+$/, "")).filter(Boolean);
+  if (paths.length > MAX_PATH_FILTERS) throw new Error(`Use at most ${MAX_PATH_FILTERS} ${label} paths`);
+  for (const path of paths) {
+    if (path.length > 200 || path.split("/").includes("..")) throw new Error(`Invalid ${label} path: ${path}`);
+  }
+  return [...new Set(paths)];
+}
+
+export function validateGitHubSourceInput(input: AddGitHubSourceInput) {
+  if (!Number.isSafeInteger(input.installationId) || input.installationId <= 0) throw new Error("Choose a GitHub account");
+  if (!Number.isSafeInteger(input.repoId) || input.repoId <= 0) throw new Error("Choose a repository");
+  const branch = input.branch?.trim() || null;
+  if (branch && (branch.length > 250 || !/^[\w./-]+$/.test(branch) || branch.includes(".."))) {
+    throw new Error("Enter a valid branch name");
+  }
+  return {
+    name: input.name?.trim().slice(0, MAX_NAME_LENGTH) || null,
+    branch,
+    includePaths: validatePathFilters(input.includePaths, "include"),
+    excludePaths: validatePathFilters(input.excludePaths, "exclude"),
+    includeReleases: input.includeReleases ?? true,
+    includeIssues: input.includeIssues ?? false,
+  };
+}

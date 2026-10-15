@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  bigint,
   bigserial,
   boolean,
   customType,
@@ -524,7 +525,7 @@ export const knowledgeSource = pgTable("knowledge_source", {
   productId: text("product_id")
     .notNull()
     .references(() => product.id, { onDelete: "cascade" }),
-  type: text("type").notNull(), // "article" | "url" | "github" | "conversation" | "sitemap"
+  type: text("type").notNull(), // "article" | "url" | "website" | "github" | "conversation" | "sitemap"
   name: text("name").notNull(),
   url: text("url"),
   content: text("content"),
@@ -542,11 +543,58 @@ export const knowledgeSource = pgTable("knowledge_source", {
   revision: integer("revision").notNull().default(0),
   // Crawl settings for website sources, e.g. { maxPages: 50 }.
   settings: jsonb("settings").$type<KnowledgeSourceSettings>(),
+  // GitHub sources connected through the GitHub App (null for public-URL sources).
+  githubInstallationId: bigint("github_installation_id", { mode: "number" }),
+  githubRepoId: bigint("github_repo_id", { mode: "number" }),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
-});
+}, (table) => [
+  index("knowledge_source_github_repo_idx")
+    .on(table.githubRepoId)
+    .where(sql`${table.githubRepoId} IS NOT NULL`),
+]);
 
-export type KnowledgeSourceSettings = { maxPages?: number };
+export type GitHubSourceSettings = {
+  // "owner/repo"; kept current by repository webhooks.
+  fullName: string;
+  private: boolean;
+  // Branch to index; null follows the repository's default branch.
+  branch: string | null;
+  // Path prefixes to include (empty = whole repository) and to skip.
+  includePaths: string[];
+  excludePaths: string[];
+  includeReleases: boolean;
+  includeIssues: boolean;
+  // Commit indexed last, shown in the UI.
+  lastCommitSha?: string | null;
+};
+
+export type KnowledgeSourceSettings = { maxPages?: number; github?: GitHubSourceSettings };
+
+// GitHub App installations linked to a workspace. One installation can be
+// linked to several workspaces (each verified through the installing user).
+export const githubInstallation = pgTable(
+  "github_installation",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    installationId: bigint("installation_id", { mode: "number" }).notNull(),
+    accountLogin: text("account_login").notNull(),
+    accountType: text("account_type").notNull(), // "User" | "Organization"
+    accountAvatarUrl: text("account_avatar_url"),
+    repositorySelection: text("repository_selection"), // "all" | "selected"
+    suspendedAt: timestamp("suspended_at"),
+    createdById: text("created_by_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("github_installation_org_installation_idx").on(table.organizationId, table.installationId),
+    index("github_installation_installation_idx").on(table.installationId),
+  ],
+);
 
 export const knowledgeSourceRelations = relations(knowledgeSource, ({ one, many }) => ({
   product: one(product, {

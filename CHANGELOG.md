@@ -4,6 +4,21 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### GitHub App for the knowledge base
+
+- **Connect GitHub:** a read-only GitHub App replaces pasting a public repository URL. Private repositories work, and the workspace picks repositories from a list.
+  - The installing GitHub user is verified through OAuth before an installation is linked, so an installation ID in the callback URL can't be forged.
+  - The connect `state` is signed, expires after 30 minutes and is bound to the Supo user who started it.
+- **What is indexed:** README, changelog and documentation files at any depth (Markdown, MDX, reStructuredText, AsciiDoc), up to 400 files, using one git tree request instead of walking folders. Front matter titles are used, and MDX imports are dropped.
+  - Release notes (default on) and the 200 most recently updated issues (opt-in).
+  - Optional branch, include folders and skip folders.
+  - Source code, tests, dependencies and repository plumbing are skipped.
+- **Updates:** a signed webhook (`/api/webhooks/github`) re-syncs on pushes to the tracked branch, releases and issue changes.
+  - Uninstalling the app, suspending it or removing repository access takes the source out of retrieval. Restoring access re-indexes it.
+  - Renames and visibility changes are followed.
+- **Privacy:** answers from private repositories never link customers to the files.
+- **Indexing:** unchanged documents reuse their stored embeddings. A sync only re-embeds the files or pages that changed. This applies to every source type.
+
 ### Review follow-ups (2)
 
 - **Job queue:**
