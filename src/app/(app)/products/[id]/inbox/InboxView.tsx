@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import type { ProductRole } from "@/lib/product-access";
 import { inboxChannelName, presenceChannelName } from "@/lib/realtime-channels";
 
-import { getConversationForInbox, listMacros, type MacroSummary, type Teammate } from "./actions";
+import { getConversationForInbox, listMacros, wakeDueSnoozes, type MacroSummary, type Teammate } from "./actions";
 import { closeAblyClient, createAgentAuthCallback, ignoreExpectedAblyTeardown } from "./ably-client";
 import { ConversationList } from "./ConversationList";
 import { ConversationThread } from "./ConversationThread";
@@ -252,6 +252,26 @@ export function InboxView({
         .finally(() => closeAblyClient(ablyClient));
     };
   }, [ablyClient, currentUserId, ensureConversation, orgId, patchConversation, productId, userName]);
+
+  // Wake snoozed conversations when their timer runs out (the server page
+  // load does this too, but realtime sessions may never reload).
+  const conversationsRef = useRef(conversations);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      const due = conversationsRef.current.some(
+        (c) => c.status === "snoozed" && c.snoozedUntil && c.snoozedUntil.getTime() <= now,
+      );
+      if (!due) return;
+      wakeDueSnoozes(productId)
+        .then((ids) => ids.forEach((id) => patchConversation(id, { status: "open", snoozedUntil: null })))
+        .catch(() => {});
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [patchConversation, productId]);
 
   // Without realtime, keep the list reasonably fresh by polling the server.
   useEffect(() => {

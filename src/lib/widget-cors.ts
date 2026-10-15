@@ -18,6 +18,10 @@ export const WIDGET_EXPOSED_HEADERS = [
 
 export const MAX_ALLOWED_ORIGINS = 25;
 
+function isDefaultPort(scheme: string, port: string): boolean {
+  return (scheme === "https" && port === ":443") || (scheme === "http" && port === ":80");
+}
+
 /**
  * Normalizes one allow-list entry. Accepts full origins (`https://app.acme.com`),
  * bare hosts (`app.acme.com`, treated as https) and wildcard subdomains
@@ -31,9 +35,11 @@ export function normalizeAllowedOrigin(raw: string): string | null {
   const match = withScheme.match(/^(https?):\/\/(\*\.)?([a-z0-9.-]+)(:\d{1,5})?$/);
   if (!match) return null;
 
-  const [, scheme, wildcard = "", host, port = ""] = match;
+  const [, scheme, wildcard = "", host, rawPort = ""] = match;
   if (!host.includes(".") && host !== "localhost") return null;
   if (host.startsWith(".") || host.endsWith(".") || host.includes("..")) return null;
+  // Browsers omit default ports from Origin, so store them the same way.
+  const port = isDefaultPort(scheme, rawPort) ? "" : rawPort;
 
   return `${scheme}://${wildcard}${host}${port}`;
 }
@@ -79,7 +85,9 @@ export function isOriginAllowed(
   return allowedOrigins.some((allowed) => {
     const match = allowed.match(/^(https?):\/\/(\*\.)?(.+)$/);
     if (!match) return false;
-    const [, allowedScheme, wildcard, allowedHost] = match;
+    const [, allowedScheme, wildcard, rawAllowedHost] = match;
+    // Entries saved before default-port normalization may still carry :443/:80.
+    const allowedHost = rawAllowedHost.replace(allowedScheme === "https" ? /:443$/ : /:80$/, "");
     if (allowedScheme !== scheme) return false;
     if (!wildcard) return allowedHost === hostWithPort;
     return hostWithPort.endsWith(`.${allowedHost}`);

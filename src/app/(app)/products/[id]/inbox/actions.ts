@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 import { after } from "next/server";
 
@@ -426,6 +426,29 @@ export async function snoozeConversation(conversationId: string, duration: strin
   await publishLifecycle(access, conv, { status: "snoozed", snoozedUntil: snoozedUntil.toISOString() });
 }
 
+/** Re-opens snoozed conversations whose snooze has expired; returns their ids. */
+export async function wakeDueSnoozes(productId: string): Promise<string[]> {
+  const access = await requireProductAccess(productId, ["inbox"]);
+  const now = new Date();
+  const woken = await db
+    .update(conversation)
+    .set({ status: "open", snoozedUntil: null, updatedAt: now })
+    .where(
+      and(eq(conversation.productId, productId), eq(conversation.status, "snoozed"), lte(conversation.snoozedUntil, now)),
+    )
+    .returning({ id: conversation.id });
+  await Promise.allSettled(
+    woken.map((row) =>
+      publishToProductInbox(access.product.organizationId, productId, "conversation_updated", {
+        conversationId: row.id,
+        status: "open",
+        snoozedUntil: null,
+      }),
+    ),
+  );
+  return woken.map((row) => row.id);
+}
+
 export async function reopenConversation(conversationId: string): Promise<void> {
   const { conv, ...access } = await verifyConversationAccess(conversationId);
   assertCanUseConversation(access, conv);
@@ -789,7 +812,17 @@ export async function searchConversations(productId: string, rawQuery: string): 
     .select({ id: conversation.id })
     .from(conversation)
     .innerJoin(customer, eq(customer.id, conversation.customerId))
-    .where(and(scope, or(ilike(customer.name, pattern), ilike(customer.email, pattern), ilike(conversation.subject, pattern))))
+    .where(
+      and(
+        scope,
+        or(
+          ilike(customer.name, pattern),
+          ilike(customer.email, pattern),
+          ilike(conversation.subject, pattern),
+          sql`array_to_string(${conversation.tags}, ' ') ILIKE ${pattern}`,
+        ),
+      ),
+    )
     .limit(100);
 
   return [...new Set([...byMessage, ...byCustomer].map((row) => row.id))];
@@ -831,18 +864,20 @@ export async function getCustomerProfile(conversationId: string): Promise<Custom
   };
 }
 
-export async function bulkResolve(conversationIds: string[]): Promise<{ resolved: number; failed: number }> {
-  let resolved = 0;
+export async function bulkResolve(
+  conversationIds: string[],
+): Promise<{ resolvedIds: string[]; failed: number }> {
+  const resolvedIds: string[] = [];
   let failed = 0;
   for (const id of conversationIds.slice(0, 100)) {
     try {
       await resolveConversation(id);
-      resolved++;
+      resolvedIds.push(id);
     } catch {
       failed++;
     }
   }
-  return { resolved, failed };
+  return { resolvedIds, failed };
 }
 
 // ── Knowledge learning ──────────────────────────────────────────────────────

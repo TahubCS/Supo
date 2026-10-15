@@ -1,11 +1,11 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
 import { knowledgeChunk, knowledgeSource, knowledgeSuggestion, widgetConfig } from "@/db/schema";
-import { queueSourceIndexing } from "@/lib/jobs";
+import { drainSoon, queueSourceIndexing } from "@/lib/jobs";
 import { geminiGenerate } from "@/lib/knowledge/ai";
 import { DEFAULT_MAX_PAGES, MAX_PAGES_LIMIT } from "@/lib/knowledge/ingest";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
@@ -177,6 +177,7 @@ export async function updateSource(sourceId: string, input: UpdateSourceInput): 
       url: values.url ?? source.url,
       content: values.content ?? source.content,
       settings: values.settings ?? source.settings,
+      ...(contentChanged ? { revision: sql`${knowledgeSource.revision} + 1` } : {}),
       updatedAt: new Date(),
     })
     .where(eq(knowledgeSource.id, sourceId));
@@ -209,12 +210,13 @@ export async function reindexSource(sourceId: string): Promise<void> {
   const source = await verifySourceAccess(sourceId);
   await requireSourceQuota(source.productId, "/knowledge/reindex-source");
 
+  const bump = { revision: sql`${knowledgeSource.revision} + 1` };
   await db
     .update(knowledgeSource)
     .set(
       source.status === "indexed" && source.chunkCount > 0
-        ? { errorMessage: null, updatedAt: new Date() }
-        : { status: "indexing", indexingStartedAt: new Date(), errorMessage: null, updatedAt: new Date() },
+        ? { ...bump, errorMessage: null, updatedAt: new Date() }
+        : { ...bump, status: "indexing", indexingStartedAt: new Date(), errorMessage: null, updatedAt: new Date() },
     )
     .where(eq(knowledgeSource.id, sourceId));
 
@@ -234,6 +236,9 @@ export type SourceStatus = {
 /** Lightweight status snapshot used by the UI while sources are indexing. */
 export async function getSourceStatuses(productId: string): Promise<SourceStatus[]> {
   await verifyProductAccess(productId);
+  // The UI polls this while sources are indexing: use that traffic to run
+  // due retries instead of waiting for the next cron run.
+  drainSoon();
   return db.query.knowledgeSource.findMany({
     where: eq(knowledgeSource.productId, productId),
     columns: {

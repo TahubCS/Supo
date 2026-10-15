@@ -2,6 +2,10 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.7
+
+- `Supo.init(...).on("message", handler)` now fires for messages received from the server (restored history, realtime and polling), once per message id.
+
 ## 0.1.0-alpha.6
 
 - **Human handoff fixes:** customers can keep typing while waiting for an agent (the composer was disabled), and the AI keeps helping until someone joins.

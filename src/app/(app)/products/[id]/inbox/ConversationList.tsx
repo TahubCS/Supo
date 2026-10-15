@@ -246,9 +246,10 @@ export function ConversationList({
     startTransition(async () => {
       const result = await bulkResolve(ids);
       if (result.failed > 0) toast.error(`${result.failed} conversation(s) could not be resolved`);
-      if (result.resolved > 0) toast.success(`Resolved ${result.resolved} conversation(s)`);
-      onResolved(ids);
-      setChecked(new Set());
+      if (result.resolvedIds.length > 0) toast.success(`Resolved ${result.resolvedIds.length} conversation(s)`);
+      // Only reflect the ones the server actually resolved; keep failures selected.
+      onResolved(result.resolvedIds);
+      setChecked(new Set(ids.filter((id) => !result.resolvedIds.includes(id))));
     });
   }
 

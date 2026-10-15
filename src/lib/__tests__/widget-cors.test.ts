@@ -13,6 +13,9 @@ describe("normalizeAllowedOrigin", () => {
     expect(normalizeAllowedOrigin("acme.com")).toBe("https://acme.com");
     expect(normalizeAllowedOrigin("*.acme.com")).toBe("https://*.acme.com");
     expect(normalizeAllowedOrigin("http://localhost:3000")).toBe("http://localhost:3000");
+    expect(normalizeAllowedOrigin("https://app.acme.com:443")).toBe("https://app.acme.com");
+    expect(normalizeAllowedOrigin("http://acme.com:80")).toBe("http://acme.com");
+    expect(normalizeAllowedOrigin("https://acme.com:8443")).toBe("https://acme.com:8443");
   });
 
   it("rejects paths, junk and single-label hosts", () => {
@@ -46,6 +49,11 @@ describe("isOriginAllowed", () => {
     expect(isOriginAllowed("https://evilacme.io", allowed)).toBe(false);
     expect(isOriginAllowed("http://acme.com", allowed)).toBe(false);
     expect(isOriginAllowed("https://acme.com.evil.com", allowed)).toBe(false);
+  });
+
+  it("treats default ports as equivalent to no port", () => {
+    expect(isOriginAllowed("https://app.acme.com", ["https://app.acme.com:443"])).toBe(true);
+    expect(isOriginAllowed("https://app.acme.com:8443", ["https://app.acme.com"])).toBe(false);
   });
 
   it("rejects missing origins when restricted, but trusts the dashboard origin", () => {

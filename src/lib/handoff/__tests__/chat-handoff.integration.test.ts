@@ -227,4 +227,40 @@ describe.skipIf(!DATABASE_URL)("chat handoff flow (database)", () => {
     const history = await pollAll(start.ref);
     expect(history.messages.some((m) => m.body.includes("SECRET"))).toBe(false);
   });
+
+  it("never exceeds the round-robin cap under concurrent escalations", async () => {
+    const { and, eq } = await import("drizzle-orm");
+    const now = new Date();
+    const solo = `user_${crypto.randomUUID()}`;
+    await dbm.db.insert(schema.user).values({
+      id: solo,
+      name: "Solo Agent",
+      email: `${solo}@example.com`,
+      emailVerified: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await dbm.db.update(schema.product).set({ routingMode: "round_robin", maxConcurrentChats: 1 }).where(eq(schema.product.id, productId));
+    onlineAgentIds = [solo];
+
+    const sendAs = async (email: string) => {
+      const res = await chat.POST(
+        new NextRequest("http://localhost:3000/api/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ productId, message: "I want to talk to a human", customer: { email, name: email } }),
+        }),
+      );
+      await res.text();
+    };
+    await Promise.all([sendAs("burst-a@example.com"), sendAs("burst-b@example.com"), sendAs("burst-c@example.com")]);
+
+    const assigned = await dbm.db.query.conversation.findMany({
+      where: and(eq(schema.conversation.productId, productId), eq(schema.conversation.assigneeId, solo)),
+    });
+    expect(assigned).toHaveLength(1);
+
+    onlineAgentIds = [];
+    await dbm.db.update(schema.product).set({ routingMode: "manual" }).where(eq(schema.product.id, productId));
+  });
 });

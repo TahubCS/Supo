@@ -1,5 +1,8 @@
+import { lookup as lookupCallback, type LookupAddress, type LookupAllOptions, type LookupOneOptions } from "node:dns";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+
+import { Agent, fetch as undiciFetch } from "undici";
 
 // Server-side fetch for user-supplied URLs (knowledge sources, crawlers).
 // Blocks requests to private/internal networks (SSRF), bounds time and size,
@@ -116,6 +119,44 @@ export async function assertPublicUrl(raw: string): Promise<URL> {
   return url;
 }
 
+type LookupCallback = (
+  error: NodeJS.ErrnoException | null,
+  address: string | LookupAddress[],
+  family?: number,
+) => void;
+
+/**
+ * DNS lookup used for the actual TCP connection. Validating here (not only
+ * before the request) closes the DNS-rebinding gap where a hostname resolves
+ * to a public address during validation and to an internal one on connect.
+ */
+export function guardedLookup(
+  hostname: string,
+  options: LookupOneOptions | LookupAllOptions | number | undefined,
+  callback: LookupCallback,
+): void {
+  const opts = typeof options === "number" ? { family: options } : (options ?? {});
+  lookupCallback(hostname, { ...opts, all: true }, (error, addresses) => {
+    if (error) {
+      callback(error, []);
+      return;
+    }
+    const list = addresses as LookupAddress[];
+    if (list.length === 0 || list.some((entry) => isPrivateAddress(entry.address))) {
+      callback(new SafeFetchError("This address is not reachable from Supo") as NodeJS.ErrnoException, []);
+      return;
+    }
+    if ((opts as LookupAllOptions).all) callback(null, list);
+    else callback(null, list[0].address, list[0].family);
+  });
+}
+
+let guardedAgent: Agent | null = null;
+function getGuardedAgent(): Agent {
+  guardedAgent ??= new Agent({ connect: { lookup: guardedLookup } });
+  return guardedAgent;
+}
+
 async function readLimited(response: Response, maxBytes: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length") ?? "0");
   if (declared > maxBytes) {
@@ -162,15 +203,18 @@ export async function safeFetch(raw: string, options: SafeFetchOptions = {}): Pr
     const url = await assertPublicUrl(current);
     let response: Response;
     try {
-      response = await fetch(url, {
+      response = (await undiciFetch(url, {
         redirect: "manual",
         signal,
         headers: { "User-Agent": USER_AGENT, Accept: accept },
-      });
+        dispatcher: getGuardedAgent(),
+      })) as unknown as Response;
     } catch (error) {
       if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
         throw new SafeFetchError(`Timed out fetching ${url.toString()}`);
       }
+      const cause = error instanceof Error && error.cause instanceof SafeFetchError ? error.cause : null;
+      if (cause) throw cause;
       throw new SafeFetchError(`Could not fetch ${url.toString()}`);
     }
 

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { knowledgeChunk, knowledgeSource } from "@/db/schema";
@@ -210,6 +210,7 @@ export async function ingestSource(sourceId: string, options: IngestOptions = {}
 
   const isFinalAttempt = options.isFinalAttempt ?? true;
   const wasIndexed = source.status === "indexed" && source.chunkCount > 0;
+  const startedRevision = source.revision;
 
   if (!wasIndexed) {
     await db
@@ -229,12 +230,17 @@ export async function ingestSource(sourceId: string, options: IngestOptions = {}
       loaded.failedPages > 0 ? `${loaded.failedPages} of ${loaded.totalPages} pages could not be fetched` : null;
 
     await db.transaction(async (tx) => {
-      // Source may have been deleted mid-run; the FK would reject the insert.
-      const stillExists = await tx.query.knowledgeSource.findFirst({
-        where: eq(knowledgeSource.id, sourceId),
-        columns: { id: true },
-      });
-      if (!stillExists) return;
+      // Lock the source row; it may have been deleted (the FK would reject the
+      // insert) or edited since this run loaded its content.
+      const current = await tx.execute(
+        sql`SELECT revision FROM knowledge_source WHERE id = ${sourceId} FOR UPDATE`,
+      );
+      const row = current.rows[0] as { revision: number } | undefined;
+      if (!row) return;
+      if (Number(row.revision) !== startedRevision) {
+        // A newer edit is queued; let that job write the index.
+        return;
+      }
 
       await tx.delete(knowledgeChunk).where(eq(knowledgeChunk.sourceId, sourceId));
       for (let i = 0; i < rows.length; i += 100) {
