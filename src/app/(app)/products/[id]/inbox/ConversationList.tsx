@@ -271,7 +271,8 @@ export function ConversationList({
       if (result.resolvedIds.length > 0) toast.success(`Resolved ${result.resolvedIds.length} conversation(s)`);
       // Only reflect the ones the server actually resolved; keep failures selected.
       onResolved(result.resolvedIds);
-      setChecked(new Set(ids.filter((id) => !result.resolvedIds.includes(id))));
+      // Drop only what was resolved; keep any selection changes made meanwhile.
+      setChecked((current) => new Set([...current].filter((id) => !result.resolvedIds.includes(id))));
     });
   }
 

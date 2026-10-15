@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { knowledgeChunk, knowledgeSource } from "@/db/schema";
@@ -202,6 +202,9 @@ export type IngestOptions = {
   // source is marked as failed. Errors are rethrown either way.
   isFinalAttempt?: boolean;
   preloaded?: LoadedDocuments;
+  // Revision the preloaded documents were loaded for; required with `preloaded`
+  // so an edit made while they were fetched is not overwritten by stale content.
+  preloadedRevision?: number;
 };
 
 export async function ingestSource(sourceId: string, options: IngestOptions = {}): Promise<void> {
@@ -210,7 +213,7 @@ export async function ingestSource(sourceId: string, options: IngestOptions = {}
 
   const isFinalAttempt = options.isFinalAttempt ?? true;
   const wasIndexed = source.status === "indexed" && source.chunkCount > 0;
-  const startedRevision = source.revision;
+  const startedRevision = options.preloaded ? (options.preloadedRevision ?? source.revision) : source.revision;
 
   if (!wasIndexed) {
     await db
@@ -275,7 +278,8 @@ export async function ingestSource(sourceId: string, options: IngestOptions = {}
             }
           : { errorMessage: `Retrying after error: ${message}`, updatedAt: new Date() },
       )
-      .where(eq(knowledgeSource.id, sourceId));
+      // A newer edit owns the source status now; a stale run must not overwrite it.
+      .where(and(eq(knowledgeSource.id, sourceId), eq(knowledgeSource.revision, startedRevision)));
     // Always surface the failure so the job is retried or recorded as failed.
     throw err;
   }
@@ -305,6 +309,6 @@ export async function syncSourceIfChanged(
     return "skipped";
   }
 
-  await ingestSource(sourceId, { ...options, preloaded: loaded });
+  await ingestSource(sourceId, { ...options, preloaded: loaded, preloadedRevision: source.revision });
   return "reindexed";
 }

@@ -129,6 +129,46 @@ async function claimJob(jobId?: string): Promise<JobRow | null> {
   return (await db.query.backgroundJob.findFirst({ where: eq(backgroundJob.id, claimedId) })) ?? null;
 }
 
+function isUniqueViolation(error: unknown): boolean {
+  const code = (error as { code?: string; cause?: { code?: string } })?.code ?? (error as { cause?: { code?: string } })?.cause?.code;
+  return code === "23505";
+}
+
+/**
+ * Puts a running job back in the queue. When a follow-up with the same
+ * dedupe key is already queued (an edit arrived while this one ran), that
+ * follow-up covers the work, so this job is retired instead; re-queueing it
+ * would violate the queued-only dedupe index and leave it stuck as running.
+ */
+async function requeueOrSupersede(jobId: string, values: { runAt: Date; lastError?: string | null }): Promise<"queued" | "superseded"> {
+  const now = new Date();
+  try {
+    const requeued = await db.execute(sql`
+      UPDATE background_job AS job
+         SET status = 'queued', locked_at = NULL, run_at = ${values.runAt.toISOString()}::timestamp,
+             last_error = COALESCE(${values.lastError ?? null}, job.last_error), updated_at = ${now.toISOString()}::timestamp
+       WHERE job.id = ${jobId}
+         AND (job.dedupe_key IS NULL OR NOT EXISTS (
+               SELECT 1 FROM background_job other
+                WHERE other.dedupe_key = job.dedupe_key AND other.status = 'queued' AND other.id <> job.id))
+      RETURNING job.id`);
+    if (requeued.rows.length > 0) return "queued";
+  } catch (error) {
+    // Lost a race with a follow-up being queued at the same moment.
+    if (!isUniqueViolation(error)) throw error;
+  }
+  await db
+    .update(backgroundJob)
+    .set({
+      status: "done",
+      lockedAt: null,
+      lastError: "Superseded by a newer queued job with the same dedupe key",
+      updatedAt: now,
+    })
+    .where(eq(backgroundJob.id, jobId));
+  return "superseded";
+}
+
 async function executeJob(job: JobRow): Promise<"done" | "retry" | "failed"> {
   const handler = handlers.get(job.type);
   const isFinalAttempt = job.attempts >= job.maxAttempts;
@@ -145,21 +185,18 @@ async function executeJob(job: JobRow): Promise<"done" | "retry" | "failed"> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[jobs] ${job.type} ${job.id} attempt ${job.attempts} failed: ${message}`);
-    await db
-      .update(backgroundJob)
-      .set(
-        isFinalAttempt || !handler
-          ? { status: "failed", lockedAt: null, lastError: message.slice(0, 2000), updatedAt: now() }
-          : {
-              status: "queued",
-              lockedAt: null,
-              lastError: message.slice(0, 2000),
-              runAt: new Date(Date.now() + retryDelayMs(job.attempts)),
-              updatedAt: now(),
-            },
-      )
-      .where(eq(backgroundJob.id, job.id));
-    return isFinalAttempt || !handler ? "failed" : "retry";
+    if (isFinalAttempt || !handler) {
+      await db
+        .update(backgroundJob)
+        .set({ status: "failed", lockedAt: null, lastError: message.slice(0, 2000), updatedAt: now() })
+        .where(eq(backgroundJob.id, job.id));
+      return "failed";
+    }
+    const requeued = await requeueOrSupersede(job.id, {
+      runAt: new Date(Date.now() + retryDelayMs(job.attempts)),
+      lastError: message.slice(0, 2000),
+    });
+    return requeued === "queued" ? "retry" : "done";
   }
 }
 
@@ -233,12 +270,18 @@ export async function enqueueAndKick(
 /** Re-queues jobs whose runner died mid-flight. */
 export async function recoverStaleJobs(): Promise<number> {
   const cutoff = new Date(Date.now() - STALE_LOCK_MS);
-  const recovered = await db
-    .update(backgroundJob)
-    .set({ status: "queued", lockedAt: null, runAt: new Date(), updatedAt: new Date() })
+  const stale = await db
+    .select({ id: backgroundJob.id })
+    .from(backgroundJob)
     .where(and(eq(backgroundJob.status, "running"), lt(backgroundJob.lockedAt, cutoff)))
-    .returning({ id: backgroundJob.id });
-  return recovered.length;
+    .limit(100);
+  // One at a time: two stale jobs (or a stale job and a queued follow-up) can
+  // share a dedupe key, and only one of them may be queued.
+  let recovered = 0;
+  for (const job of stale) {
+    if ((await requeueOrSupersede(job.id, { runAt: new Date() })) === "queued") recovered++;
+  }
+  return recovered;
 }
 
 export async function drainJobs({
