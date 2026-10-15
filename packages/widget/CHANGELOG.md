@@ -2,6 +2,11 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.9
+
+- **Suggested articles:** when the product has a published help center, the empty chat shows up to three popular articles and a link to browse the help center. The config response gained `helpCenter` (`SupoHelpCenter` type).
+- AI answers built from help center articles link to the public article.
+
 ## 0.1.0-alpha.8
 
 - **Customer satisfaction (CSAT):** when an agent resolves a conversation the widget asks "How did we do?" with a 1–5 star rating and an optional comment.

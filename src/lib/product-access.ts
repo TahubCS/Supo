@@ -20,6 +20,7 @@ const roleCapabilities: Record<ProductRole, Set<string>> = {
   admin: new Set([
     "analytics",
     "developerDocs",
+    "helpCenter",
     "inbox",
     "inboxSettings",
     "knowledge",
@@ -29,6 +30,7 @@ const roleCapabilities: Record<ProductRole, Set<string>> = {
   ]),
   developer: new Set([
     "developerDocs",
+    "helpCenter",
     "inbox",
     "inboxSettings",
     "knowledge",

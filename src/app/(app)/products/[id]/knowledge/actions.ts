@@ -8,6 +8,7 @@ import { knowledgeChunk, knowledgeSource, knowledgeSuggestion, widgetConfig } fr
 import { drainSoon, queueSourceIndexing } from "@/lib/jobs";
 import { geminiGenerate } from "@/lib/knowledge/ai";
 import { DEFAULT_MAX_PAGES, MAX_PAGES_LIMIT } from "@/lib/knowledge/ingest";
+import { parseUploadedFile } from "@/lib/knowledge/parse-file";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
 import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 import { recordProductAudit } from "@/lib/audit";
@@ -145,6 +146,24 @@ export async function addSource(productId: string, input: AddSourceInput): Promi
   await queueSourceIndexing(sourceId);
   await auditKnowledge(productId, "knowledge.source_added", sourceId, { type: input.type, name: values.name });
   return sourceId;
+}
+
+/** Adds an uploaded document (PDF, Word, Markdown, …) as a text source. */
+export async function uploadSourceFile(
+  productId: string,
+  formData: FormData,
+): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+  try {
+    await verifyProductAccess(productId);
+    const file = formData.get("file");
+    if (!(file instanceof File)) return { ok: false, error: "Choose a file to upload" };
+    const parsed = await parseUploadedFile(file.name, new Uint8Array(await file.arrayBuffer()));
+    const name = String(formData.get("name") ?? "").trim() || parsed.title;
+    const id = await addSource(productId, { type: "article", name, content: parsed.text.slice(0, MAX_ARTICLE_LENGTH) });
+    return { ok: true, id };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not add this file" };
+  }
 }
 
 export type UpdateSourceInput = {

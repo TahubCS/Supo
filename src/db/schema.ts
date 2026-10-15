@@ -758,3 +758,103 @@ export const conversationRating = pgTable(
   },
   (table) => [index("conversation_rating_product_created_idx").on(table.productId, table.createdAt)],
 );
+
+// ── Help center ─────────────────────────────────────────────────────────────
+
+export const helpCenter = pgTable(
+  "help_center",
+  {
+    productId: text("product_id")
+      .primaryKey()
+      .references(() => product.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    // Public URL: /help/{slug}
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("help_center_slug_idx").on(table.slug)],
+);
+
+export const articleCategory = pgTable(
+  "article_category",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("article_category_product_slug_idx").on(table.productId, table.slug)],
+);
+
+export const article = pgTable(
+  "article",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    categoryId: text("category_id").references(() => articleCategory.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    slug: text("slug").notNull(),
+    summary: text("summary"),
+    bodyMd: text("body_md").notNull().default(""),
+    status: text("status").notNull().default("draft"), // "draft" | "published"
+    authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
+    // Published articles are mirrored into the knowledge base for the AI.
+    knowledgeSourceId: text("knowledge_source_id").references(() => knowledgeSource.id, { onDelete: "set null" }),
+    publishedAt: timestamp("published_at"),
+    viewCount: integer("view_count").notNull().default(0),
+    helpfulCount: integer("helpful_count").notNull().default(0),
+    notHelpfulCount: integer("not_helpful_count").notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+    searchTsv: tsvector("search_tsv").generatedAlwaysAs(
+      sql`setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(summary, '')), 'B') || setweight(to_tsvector('english', coalesce(body_md, '')), 'C')`,
+    ),
+  },
+  (table) => [
+    uniqueIndex("article_product_slug_idx").on(table.productId, table.slug),
+    index("article_product_status_idx").on(table.productId, table.status),
+  ],
+);
+
+export const articleVersion = pgTable(
+  "article_version",
+  {
+    id: text("id").primaryKey(),
+    articleId: text("article_id")
+      .notNull()
+      .references(() => article.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    summary: text("summary"),
+    bodyMd: text("body_md").notNull(),
+    authorId: text("author_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("article_version_article_idx").on(table.articleId, table.createdAt)],
+);
+
+export const helpCenterRelations = relations(helpCenter, ({ one }) => ({
+  product: one(product, { fields: [helpCenter.productId], references: [product.id] }),
+}));
+
+export const articleRelations = relations(article, ({ one, many }) => ({
+  product: one(product, { fields: [article.productId], references: [product.id] }),
+  category: one(articleCategory, { fields: [article.categoryId], references: [articleCategory.id] }),
+  author: one(user, { fields: [article.authorId], references: [user.id] }),
+  versions: many(articleVersion),
+}));
+
+export const articleVersionRelations = relations(articleVersion, ({ one }) => ({
+  article: one(article, { fields: [articleVersion.articleId], references: [article.id] }),
+  author: one(user, { fields: [articleVersion.authorId], references: [user.id] }),
+}));

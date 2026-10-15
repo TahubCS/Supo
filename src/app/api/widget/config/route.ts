@@ -3,6 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { product } from "@/db/schema";
+import { getHelpCenterForProduct, helpCenterUrl, listPopularArticles } from "@/lib/help-center/service";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
 import { widgetCorsHeaders } from "@/lib/widget-cors";
 import { checkWidgetOrigin } from "@/lib/widget-origin";
@@ -36,6 +37,18 @@ export async function GET(req: NextRequest) {
   }
   CORS = originCheck.cors;
 
+  // Popular help center articles, shown as suggestions when the widget opens.
+  const center = await getHelpCenterForProduct(productId);
+  const helpCenter = center?.enabled
+    ? {
+        url: helpCenterUrl(center.slug),
+        articles: (await listPopularArticles(productId, 3)).map((item) => ({
+          title: item.title,
+          url: helpCenterUrl(center.slug, item.slug),
+        })),
+      }
+    : null;
+
   return NextResponse.json(
     {
       productId,
@@ -51,6 +64,7 @@ export async function GET(req: NextRequest) {
         pollingFallback: true,
         betaNotice: true,
       },
+      helpCenter,
     },
     { headers: CORS },
   );

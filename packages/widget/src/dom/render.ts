@@ -1,5 +1,5 @@
 import { ICON_AGENT, ICON_CHAT, ICON_CLOSE, ICON_MSG_SM, ICON_X_SM } from "./icons";
-import type { SupoAppearance, SupoCustomer, SupoMessage } from "../types";
+import type { SupoAppearance, SupoCustomer, SupoHelpCenter, SupoMessage } from "../types";
 
 function safeHttpUrl(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -61,6 +61,8 @@ export type ChatView = {
   needsEmail: boolean;
   // Name of the agent currently typing, if any.
   agentTyping: string | null;
+  // Help center links suggested before the first message.
+  helpCenter: SupoHelpCenter | null;
   // CSAT prompt after the conversation was resolved.
   rating: { requested: boolean; selected: number | null; comment: string; submitting: boolean };
 };
@@ -112,6 +114,7 @@ function renderChat(appearance: Required<SupoAppearance>, messages: SupoMessage[
 
   if (messages.length === 0) {
     html += `<div class="supo-msg supo-ai"><div class="supo-bub">${escapeHtml(appearance.greeting)}</div></div>`;
+    html += renderSuggestedArticles(view.helpCenter);
   }
 
   for (const message of messages) {
@@ -152,6 +155,24 @@ function renderChat(appearance: Required<SupoAppearance>, messages: SupoMessage[
   return `${html}<div id="supo-composer"><textarea id="supo-input" placeholder="${escapeHtml(
     placeholder,
   )}" rows="1"${disabled}></textarea><button id="supo-send"${disabled}>Send</button></div>`;
+}
+
+function renderSuggestedArticles(helpCenter: SupoHelpCenter | null): string {
+  if (!helpCenter) return "";
+  const links = helpCenter.articles
+    .slice(0, 3)
+    .map((item) => {
+      const href = safeHttpUrl(item.url);
+      return href
+        ? `<a class="supo-article" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>`
+        : "";
+    })
+    .join("");
+  const home = safeHttpUrl(helpCenter.url);
+  if (!links && !home) return "";
+  return `<div class="supo-articles">${links ? `<div class="supo-articles-label">Popular articles</div>${links}` : ""}${
+    home ? `<a class="supo-articles-all" href="${escapeHtml(home)}" target="_blank" rel="noopener noreferrer">Browse the help center →</a>` : ""
+  }</div>`;
 }
 
 function renderRating(rating: ChatView["rating"]) {
