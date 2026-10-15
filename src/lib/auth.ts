@@ -11,6 +11,11 @@ import { env } from "@/lib/env";
 import { escapeHtml } from "@/lib/html";
 
 const resend = new Resend(env.RESEND_API_KEY);
+const defaultSenderEmail =
+  env.SECURITY_ALERT_FROM_EMAIL ??
+  (process.env.NODE_ENV === "production"
+    ? "Supo <no-reply@muhammadtahubkhatri.dev>"
+    : "Supo <onboarding@resend.dev>");
 function normalizeOrigin(url: string | undefined): string | null {
   if (!url) return null;
   try {
@@ -113,7 +118,7 @@ export const auth = betterAuth({
     requireEmailVerification: true,
     sendResetPasswordEmail: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
       await resend.emails.send({
-        from: env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>",
+        from: defaultSenderEmail,
         to: user.email,
         subject: "Reset your Supo password",
         html: `
@@ -130,7 +135,7 @@ export const auth = betterAuth({
     sendOnSignIn: true,
     sendVerificationEmail: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
       await resend.emails.send({
-        from: env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>",
+        from: defaultSenderEmail,
         to: user.email,
         subject: "Verify your Supo account",
         html: `

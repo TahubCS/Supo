@@ -4,7 +4,11 @@ import { env } from "@/lib/env";
 import { escapeHtml } from "@/lib/html";
 import type { ProductRole } from "@/lib/product-access";
 
-const INVITE_FROM = env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>";
+const INVITE_FROM =
+  env.SECURITY_ALERT_FROM_EMAIL ??
+  (process.env.NODE_ENV === "production"
+    ? "Supo <no-reply@muhammadtahubkhatri.dev>"
+    : "Supo <onboarding@resend.dev>");
 const RESEND_KEY_PATTERN = /^re_[A-Za-z0-9_-]+$/;
 
 export type ProductInviteEmailResult =

@@ -10,7 +10,12 @@ export function getClient(): Resend {
 }
 
 export function defaultFromAddress(): string {
-  return env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>";
+  return (
+    env.SECURITY_ALERT_FROM_EMAIL ??
+    (process.env.NODE_ENV === "production"
+      ? "Supo <no-reply@muhammadtahubkhatri.dev>"
+      : "Supo <onboarding@resend.dev>")
+  );
 }
 
 export function appUrl(path = ""): string {

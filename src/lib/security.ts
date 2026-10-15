@@ -75,7 +75,11 @@ const quotaLimiters = new Map<QuotaName, Ratelimit>();
 // Keep normalized quota keys conservatively short so the final Redis keys,
 // including rate-limit prefixes, stay predictable even with user identifiers.
 const MAX_QUOTA_KEY_LENGTH = 180;
-const SECURITY_ALERT_FROM = env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>";
+const SECURITY_ALERT_FROM =
+  env.SECURITY_ALERT_FROM_EMAIL ??
+  (process.env.NODE_ENV === "production"
+    ? "Supo <no-reply@muhammadtahubkhatri.dev>"
+    : "Supo <onboarding@resend.dev>");
 
 export class SecurityQuotaError extends Error {
   status: number;
