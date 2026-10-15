@@ -48,6 +48,7 @@ export function buildStyles(cfg: Required<SupoAppearance>): string {
 .supo-ai .supo-bub{background:${messageBg};color:${text};border-bottom-left-radius:4px}
 .supo-agent .supo-bub{background:${agentBg};color:${agentText};border:1px solid ${agentBorder};border-bottom-left-radius:4px}
 .supo-system .supo-bub{background:${systemBg};color:${systemText};border:1px solid ${systemBorder};border-radius:8px;font-size:11px;text-align:center;width:100%}
+.supo-sources{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:4px;max-width:100%}.supo-sources-label{font-size:10px;color:${muted};margin-right:2px}.supo-source{font-size:10px;line-height:1.4;padding:2px 7px;border:1px solid ${border};border-radius:999px;color:${muted};text-decoration:none;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}a.supo-source:hover{color:${text};border-color:${accent}}
 .supo-sender-label{font-size:10px;color:${muted};margin-bottom:2px}.supo-agent .supo-sender-label{color:${agentText};opacity:.8}
 .supo-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:${muted};animation:supo-blink 1.2s infinite;margin:0 1px}.supo-dot:nth-child(2){animation-delay:.2s}.supo-dot:nth-child(3){animation-delay:.4s}@keyframes supo-blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
 .supo-spin{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;animation:supo-rotate .8s linear infinite}@keyframes supo-rotate{to{transform:rotate(360deg)}}

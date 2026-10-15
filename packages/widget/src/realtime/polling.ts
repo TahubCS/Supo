@@ -1,8 +1,14 @@
-import type { SupoEscalationStatus } from "../types";
+import type { SupoEscalationStatus, SupoSource } from "../types";
 import { joinUrl } from "../runtime/config";
 
 export type SupoPollResponse = {
-  messages: Array<{ id: string; body: string; senderType: "customer" | "ai" | "agent"; createdAt: string }>;
+  messages: Array<{
+    id: string;
+    body: string;
+    senderType: "customer" | "ai" | "agent";
+    createdAt: string;
+    sources?: SupoSource[];
+  }>;
   escalationStatus: SupoEscalationStatus;
   lastMessageAt: string;
 };

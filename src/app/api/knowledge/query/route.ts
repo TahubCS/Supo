@@ -1,74 +1,57 @@
-import { sql } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { isAuthorizedInternalRequest } from "@/lib/internal-auth";
-import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
+import { geminiGenerate } from "@/lib/knowledge/ai";
+import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
+import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 
 export const maxDuration = 60;
 
+// Internal knowledge Q&A endpoint (server-to-server). Uses the same retrieval
+// and prompt as the widget.
 export async function POST(req: NextRequest) {
   if (!isAuthorizedInternalRequest(req.headers)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { productId, question } = (await req.json()) as {
-    productId: string;
-    question: string;
-  };
+  let body: { productId?: string; question?: string };
+  try {
+    body = (await req.json()) as { productId?: string; question?: string };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
+  const productId = body.productId?.trim();
+  const question = body.question?.trim().slice(0, 2000);
   if (!productId || !question) {
     return NextResponse.json({ error: "productId and question required" }, { status: 400 });
   }
 
-  const queryEmbedding = await geminiEmbed(question, productId);
-  const vectorStr = `[${queryEmbedding.join(",")}]`;
+  const foundProduct = await db.query.product.findFirst({
+    where: (p, { eq }) => eq(p.id, productId),
+  });
+  if (!foundProduct) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
-  const results = await db.execute(
-    sql`SELECT kc.id, kc.content, kc.metadata, ks.name AS source_name, ks.url AS source_url,
-               1 - (kc.embedding <=> ${vectorStr}::vector) AS similarity
-        FROM knowledge_chunk kc
-        JOIN knowledge_source ks ON ks.id = kc.source_id
-        WHERE kc.product_id = ${productId}
-          AND ks.status = 'indexed'
-        ORDER BY kc.embedding <=> ${vectorStr}::vector
-        LIMIT 5`,
-  );
-
-  type ChunkRow = {
-    id: string;
-    content: string;
-    metadata: string | null;
-    source_name: string;
-    source_url: string | null;
-    similarity: number;
-  };
-
-  const MIN_SIMILARITY = 0.4;
-  const chunks = (results.rows as ChunkRow[]).filter((c) => c.similarity >= MIN_SIMILARITY);
-
-  if (chunks.length === 0) {
+  const retrieval = await retrieveKnowledge({ productId, query: question });
+  if (retrieval.chunks.length === 0) {
     return NextResponse.json({
       answer: "I don't have enough information in the knowledge base to answer that question.",
       sources: [],
     });
   }
 
-  const context = chunks
-    .map((c, i) => `[${i + 1}] ${c.source_name}\n${c.content}`)
-    .join("\n\n---\n\n");
+  const answer = await geminiGenerate(
+    question,
+    buildSupportSystemPrompt({
+      botName: "Support",
+      productName: foundProduct.name,
+      productDescription: foundProduct.description,
+      chunks: retrieval.chunks,
+    }),
+  );
 
-  const systemPrompt = `You are a helpful support assistant. Answer the user's question using ONLY the provided knowledge base context.
-Be concise and accurate. If the context doesn't contain enough information, say so clearly.
-Always cite which source(s) your answer is based on by referencing them as [1], [2], etc.`;
-
-  const prompt = `Knowledge base context:\n${context}\n\nQuestion: ${question}`;
-
-  const answer = await geminiGenerate(prompt, systemPrompt);
-
-  const sources = chunks
-    .map((c) => ({ name: c.source_name, url: c.source_url }))
-    .filter((s, i, arr) => arr.findIndex((x) => x.name === s.name) === i);
-
-  return NextResponse.json({ answer, sources });
+  return NextResponse.json({ answer, sources: citationsFor(retrieval.chunks) });
 }

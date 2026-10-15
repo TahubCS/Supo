@@ -1,6 +1,5 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText } from "ai";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
@@ -9,9 +8,11 @@ import {
   message,
   product,
 } from "@/db/schema";
-import { env } from "@/lib/env";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
-import { geminiEmbed, resolveGenerationModel } from "@/lib/knowledge/ai";
+import { google, resolveGenerationModel } from "@/lib/knowledge/ai";
+import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
+import { buildRetrievalQuery, isSmallTalk } from "@/lib/knowledge/rank";
+import { citationsFor, retrieveKnowledge, type RetrievedChunk } from "@/lib/knowledge/retrieve";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
 import {
   isSecurityQuotaError,
@@ -372,68 +373,49 @@ export async function POST(req: NextRequest) {
       content: m.body,
     }));
 
-  // ── RAG: semantic search over knowledge base ─────────────────────────────
-  type SourceRow = { content: string; source_name: string; source_url: string | null };
-  const sources: { name: string; url: string | null }[] = [];
-  let ragContext = "";
-  let foundRelevantKnowledge = false;
+  // ── Knowledge retrieval (hybrid vector + keyword search) ────────────────
+  const smallTalk = isSmallTalk(trimmedMessage);
+  let retrievedChunks: RetrievedChunk[] = [];
+  let retrievalFailed = false;
 
-  try {
-    const queryEmbedding = await geminiEmbed(trimmedMessage, productId);
-    const vectorStr = `[${queryEmbedding.join(",")}]`;
-
-    const results = await db.execute(
-      sql`SELECT kc.content, ks.name AS source_name, ks.url AS source_url,
-                 1 - (kc.embedding <=> ${vectorStr}::vector) AS similarity
-          FROM knowledge_chunk kc
-          JOIN knowledge_source ks ON ks.id = kc.source_id
-          WHERE kc.product_id = ${productId}
-            AND ks.status = 'indexed'
-            AND 1 - (kc.embedding <=> ${vectorStr}::vector) >= 0.4
-          ORDER BY kc.embedding <=> ${vectorStr}::vector
-          LIMIT 5`,
-    );
-
-    const chunks = results.rows as (SourceRow & { similarity: number })[];
-    if (chunks.length > 0) {
-      foundRelevantKnowledge = true;
-      ragContext = chunks
-        .map((c, i) => `[${i + 1}] ${c.source_name}\n${c.content}`)
-        .join("\n\n---\n\n");
-      for (const c of chunks) {
-        if (!sources.some((s) => s.name === c.source_name)) {
-          sources.push({ name: c.source_name, url: c.source_url });
-        }
-      }
+  if (!smallTalk) {
+    try {
+      const previousCustomerMessages = history
+        .filter((m) => m.senderType === "customer" && m.id !== customerMessageId)
+        .map((m) => m.body)
+        .slice(-3);
+      const retrieval = await retrieveKnowledge({
+        productId,
+        query: buildRetrievalQuery(trimmedMessage, previousCustomerMessages),
+      });
+      retrievedChunks = retrieval.chunks;
+    } catch (error) {
+      retrievalFailed = true;
+      console.error("[chat] knowledge retrieval failed", error);
     }
-  } catch {
-    // KB not set up yet — proceed without context
   }
 
-  if (!foundRelevantKnowledge) {
+  const foundRelevantKnowledge = retrievedChunks.length > 0;
+  const citations = citationsFor(retrievedChunks);
+
+  if (!foundRelevantKnowledge && !smallTalk && !retrievalFailed) {
     createMissingKnowledgeSuggestion({
       productId,
       question: trimmedMessage,
       sourceConversationId: conv.id,
-      reason:
-        "A customer asked this in the widget, but no indexed knowledge matched above the retrieval threshold.",
+      reason: "A customer asked this in the widget, but no indexed knowledge matched it.",
     }).catch(() => {});
   }
 
   // ── System prompt ────────────────────────────────────────────────────────
-  const systemLines = [
-    `You are ${botName}, a helpful and friendly customer support assistant for ${foundProduct.name}.`,
-    foundProduct.description ? `About this product: ${foundProduct.description}` : null,
-    ragContext
-      ? `Use the following knowledge base to answer accurately. Cite sources as [1], [2], etc. when relevant:\n\n${ragContext}\n\nIf the question is not covered by the knowledge base, acknowledge it and offer to connect the customer with a human agent.`
-      : "Answer as helpfully as you can based on context. If you are not confident, offer to connect the customer with a human agent.",
-    "Keep responses concise, clear, and friendly. Never make up information you are not sure about.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const systemLines = buildSupportSystemPrompt({
+    botName,
+    productName: foundProduct.name,
+    productDescription: foundProduct.description,
+    chunks: retrievedChunks,
+  });
 
   // ── Stream generation ────────────────────────────────────────────────────
-  const google = createGoogleGenerativeAI({ apiKey: env.GOOGLE_GEMINI_API_KEY });
   const modelId = await resolveGenerationModel();
 
   const convId = conv.id;
@@ -446,7 +428,8 @@ export async function POST(req: NextRequest) {
     onFinish: async ({ text }) => {
       const finishAt = new Date();
       const newMsgId = crypto.randomUUID();
-      const notifyAgent = shouldNotifyAgent(text, foundRelevantKnowledge);
+      // Small talk and retrieval outages must not page a human.
+      const notifyAgent = shouldNotifyAgent(text, foundRelevantKnowledge || smallTalk || retrievalFailed);
       const nextEscalationStatus = notifyAgent ? "pending" : null;
       const nextAiHandled = !notifyAgent;
       await db.insert(message).values({
@@ -455,6 +438,7 @@ export async function POST(req: NextRequest) {
         body: text,
         senderType: "ai",
         senderId: null,
+        sources: citations.length > 0 ? citations : null,
         createdAt: finishAt,
       });
       await db
@@ -473,6 +457,7 @@ export async function POST(req: NextRequest) {
         id: newMsgId,
         body: text,
         senderType: "ai",
+        sources: citations,
         createdAt: finishAt.toISOString(),
       }).catch(() => {});
       publishToProductInbox(orgId, productId, "conversation_updated", {
@@ -516,9 +501,10 @@ export async function POST(req: NextRequest) {
   // Widget reads x-conversation-id on the first response and stores it for subsequent turns.
   headers.set("x-conversation-id", convId);
   headers.set("x-conversation-token", conv.publicAccessToken);
-  // Optional: widget can display source attributions after the stream ends.
-  if (sources.length > 0) {
-    headers.set("x-sources", JSON.stringify(sources));
+  // Citations for the answer. Base64-encoded JSON: header values must be
+  // Latin-1, and page titles often are not (setting them raw throws).
+  if (citations.length > 0) {
+    headers.set("x-sources", Buffer.from(JSON.stringify(citations), "utf8").toString("base64"));
   }
 
   return new Response(streamResponse.body, { status: 200, headers });

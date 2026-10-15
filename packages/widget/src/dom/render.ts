@@ -1,6 +1,31 @@
 import { ICON_AGENT, ICON_CHAT, ICON_CLOSE, ICON_MSG_SM, ICON_X_SM } from "./icons";
 import type { SupoAppearance, SupoCustomer, SupoMessage } from "../types";
 
+function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function renderSources(sources: SupoMessage["sources"]): string {
+  if (!sources || sources.length === 0) return "";
+  const items = sources
+    .slice(0, 4)
+    .map((source) => {
+      const title = escapeHtml(source.title.length > 60 ? `${source.title.slice(0, 57)}…` : source.title);
+      const href = safeHttpUrl(source.url);
+      return href
+        ? `<a class="supo-source" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${title}</a>`
+        : `<span class="supo-source">${title}</span>`;
+    })
+    .join("");
+  return `<div class="supo-sources"><span class="supo-sources-label">Sources</span>${items}</div>`;
+}
+
 export function escapeHtml(value: unknown): string {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -98,7 +123,7 @@ function renderChat(
     if (message.role === "customer") {
       html += `<div class="supo-msg supo-user"><div class="supo-bub">${escapeHtml(message.body)}</div></div>`;
     } else if (message.role === "ai") {
-      html += `<div class="supo-msg supo-ai"><div class="supo-bub supo-ai-bub">${escapeHtml(message.body)}</div></div>`;
+      html += `<div class="supo-msg supo-ai"><div class="supo-bub supo-ai-bub">${escapeHtml(message.body)}</div>${renderSources(message.sources)}</div>`;
     } else if (message.role === "agent") {
       html += `<div class="supo-msg supo-agent"><div class="supo-sender-label">Support Agent</div><div class="supo-bub">${escapeHtml(message.body)}</div></div>`;
     } else if (message.role === "typing") {

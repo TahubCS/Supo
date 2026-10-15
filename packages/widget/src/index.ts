@@ -8,6 +8,8 @@ export type {
   SupoHooks,
   SupoInitOptions,
   SupoMessage,
+  SupoSendResult,
+  SupoSource,
   SupoRealtimeMode,
   SupoRuntime,
   SupoState,

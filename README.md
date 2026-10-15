@@ -70,16 +70,27 @@ src/lib/                           Auth, env, admin, security, and knowledge uti
 drizzle/                           SQL migrations
 ```
 
-## Knowledge Automation
+## Knowledge Base
 
-Supo's knowledge system is designed around a review queue instead of silently changing production knowledge.
+**Sources:** articles (markdown), single pages, whole websites (crawled via `robots.txt` / `sitemap.xml`, sitemap indexes, or by following links under the start URL; up to 200 pages), GitHub repositories (README and `docs/`), and approved answers learned from conversations. URL, website and GitHub sources re-sync daily and are only re-embedded when their content changes.
 
-- Conversations can produce pending FAQ suggestions.
-- Widget and admin test queries can create missing-knowledge gap suggestions.
-- Gap suggestions store the real question without fake placeholder answers.
-- Reviewers can edit gap answers, approve useful suggestions into `knowledge_source`, or reject them.
-- Approved sources are ingested and indexed through the existing background ingestion pipeline.
-- Re-indexing prepares replacement chunks before swapping, so previously indexed knowledge remains usable if a later sync fails.
+**Pipeline** (`src/lib/knowledge/*`):
+
+1. `safe-fetch` downloads pages with SSRF protection (private/internal addresses blocked, redirects re-validated), timeouts and size limits.
+2. `extract` turns HTML into structured text (headings, paragraphs, lists), dropping navigation, headers, footers and scripts.
+3. `chunk` splits by heading, then paragraph, then sentence, into passages of at most 1,200 characters with sentence overlap. The page title and heading path are embedded with each passage.
+4. Gemini embeddings (768 dimensions) are stored in pgvector; Postgres maintains a full-text `tsvector` for each passage.
+5. `retrieve` runs vector and keyword search in parallel, merges them with Reciprocal Rank Fusion and keeps only relevant passages. Retrieval is scoped to the product (pgvector ≥ 0.8 uses HNSW iterative scans; older versions use an exact per-product scan).
+6. `prompt` builds one grounded system prompt, shared by the widget and the admin test panel. AI answers carry citations that the widget shows as source links.
+
+**Background jobs:** indexing runs on a Postgres job queue (`background_job`, `src/lib/jobs`). Jobs start right after the request through Next.js `after()`, retry with backoff, and are recovered by cron if a function dies. `/api/cron/sync-knowledge` (daily) re-queues stuck sources, syncs stale ones and drains the queue; `/api/cron/jobs` drains the queue. On Vercel Pro you can schedule `/api/cron/jobs` every few minutes.
+
+**Review queue:**
+
+- Resolved conversations can produce pending FAQ suggestions.
+- Unanswered customer questions become missing-knowledge gaps. Small talk is ignored and similar questions are merged with an "asked N×" counter.
+- Reviewers can write answers to gaps and approve them into the knowledge base, or reject them.
+- Re-indexing swaps chunks atomically, so the previous index keeps serving if a refresh fails.
 
 ## Security Posture
 

@@ -2,6 +2,13 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.5
+
+- AI answers now show the knowledge base articles they were based on as clickable source chips.
+- Added `sendMessageWithSources()` to the headless client (returns `{ text, sources }`); `sendMessage()` is unchanged.
+- `SupoMessage` gained an optional `sources` field, also populated from polling.
+- Reads the `x-sources` response header as base64-encoded JSON (the server no longer sends raw JSON, which broke on non-ASCII titles).
+
 ## 0.1.0-alpha.4
 
 - Added stable customer identity support through `customer.externalId`.

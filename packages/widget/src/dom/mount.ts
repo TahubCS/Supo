@@ -203,8 +203,8 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
     render();
 
     try {
-      const response = await headless.sendMessage(body);
-      messages[messages.length - 1] = { role: "ai", body: response };
+      const response = await headless.sendMessageWithSources(body);
+      messages[messages.length - 1] = { role: "ai", body: response.text, sources: response.sources };
       connection = headless.getEscalationStatus() === "pending" ? "waiting_agent" : "idle";
       render();
     } catch (error) {

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -11,7 +12,14 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { addSource, type AddSourceInput } from "./actions";
 
-type SourceType = "article" | "url" | "github";
+type SourceType = AddSourceInput["type"];
+
+const SOURCE_TYPES: { id: SourceType; label: string }[] = [
+  { id: "article", label: "Article" },
+  { id: "website", label: "Website" },
+  { id: "url", label: "Single page" },
+  { id: "github", label: "GitHub" },
+];
 
 const segmentBase = "flex-1 py-1.5 text-xs font-medium transition-colors duration-150";
 const segmentActive = "bg-[color:var(--card-elevated)] text-foreground";
@@ -24,6 +32,7 @@ export function AddSourceDialog({ productId }: { productId: string }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
+  const [maxPages, setMaxPages] = useState(50);
   const [isPending, startTransition] = useTransition();
 
   function reset() {
@@ -31,22 +40,31 @@ export function AddSourceDialog({ productId }: { productId: string }) {
     setName("");
     setUrl("");
     setContent("");
+    setMaxPages(50);
   }
+
+  const needsUrl = type !== "article";
 
   function handleSubmit() {
     if (!name.trim()) return;
     const input: AddSourceInput = {
       type,
       name: name.trim(),
-      url: (type === "url" || type === "github") ? url.trim() : undefined,
+      url: needsUrl ? url.trim() : undefined,
       content: type === "article" ? content.trim() : undefined,
+      maxPages: type === "website" ? maxPages : undefined,
     };
 
     startTransition(async () => {
-      await addSource(productId, input);
-      setOpen(false);
-      reset();
-      router.refresh();
+      try {
+        await addSource(productId, input);
+        toast.success("Source added — indexing has started");
+        setOpen(false);
+        reset();
+        router.refresh();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Could not add source");
+      }
     });
   }
 
@@ -64,68 +82,85 @@ export function AddSourceDialog({ productId }: { productId: string }) {
         </DialogHeader>
 
         <div className="space-y-4 pt-1">
-          {/* Type selector */}
           <div className="flex overflow-hidden rounded-lg border border-border">
-            {(["article", "url", "github"] as const).map((t) => (
+            {SOURCE_TYPES.map((t) => (
               <button
-                key={t}
+                key={t.id}
                 type="button"
-                onClick={() => setType(t)}
-                className={`${segmentBase} capitalize ${type === t ? segmentActive : segmentInactive}`}
+                onClick={() => setType(t.id)}
+                className={`${segmentBase} ${type === t.id ? segmentActive : segmentInactive}`}
               >
-                {t === "github" ? "GitHub" : t.charAt(0).toUpperCase() + t.slice(1)}
+                {t.label}
               </button>
             ))}
           </div>
 
-          {/* Name */}
           <div className="space-y-1.5">
-            <Label className="text-xs text-[color:var(--text-secondary)]">Name</Label>
+            <Label htmlFor="source-name" className="text-xs text-[color:var(--text-secondary)]">Name</Label>
             <Input
-              placeholder="e.g. Getting started guide"
+              id="source-name"
+              placeholder={type === "website" ? "e.g. Help center" : "e.g. Getting started guide"}
               value={name}
+              maxLength={200}
               onChange={(e) => setName(e.target.value)}
             />
           </div>
 
-          {/* Type-specific field */}
           {type === "article" && (
             <div className="space-y-1.5">
-              <Label className="text-xs text-[color:var(--text-secondary)]">Content</Label>
+              <Label htmlFor="source-content" className="text-xs text-[color:var(--text-secondary)]">Content</Label>
               <Textarea
-                placeholder="Paste your documentation, FAQ, or any text the AI should learn from…"
+                id="source-content"
+                placeholder="Paste documentation, FAQs or policies. Markdown headings (# Title) are used to split sections."
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                rows={6}
-                className="resize-none text-sm"
+                rows={8}
+                className="resize-y text-sm"
               />
             </div>
           )}
 
-          {type === "url" && (
+          {needsUrl && (
             <div className="space-y-1.5">
-              <Label className="text-xs text-[color:var(--text-secondary)]">URL</Label>
+              <Label htmlFor="source-url" className="text-xs text-[color:var(--text-secondary)]">
+                {type === "github" ? "Repository URL" : type === "website" ? "Website or docs URL" : "Page URL"}
+              </Label>
               <Input
+                id="source-url"
                 type="url"
-                placeholder="https://your-docs-site.com/page"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-              />
-            </div>
-          )}
-
-          {type === "github" && (
-            <div className="space-y-1.5">
-              <Label className="text-xs text-[color:var(--text-secondary)]">Repository URL</Label>
-              <Input
-                type="url"
-                placeholder="https://github.com/owner/repo"
+                placeholder={
+                  type === "github"
+                    ? "https://github.com/owner/repo"
+                    : type === "website"
+                      ? "https://docs.your-site.com"
+                      : "https://your-site.com/help/page"
+                }
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
               />
               <p className="text-xs text-[color:var(--text-tertiary)]">
-                Indexes README + files in <code className="font-mono">docs/</code> folder. Works with public repos.
+                {type === "website" &&
+                  "Pages are discovered from robots.txt / sitemap.xml, or by following links under this URL's path. Re-synced daily."}
+                {type === "url" && "Only this page is indexed. Re-synced daily."}
+                {type === "github" &&
+                  "Indexes the README and markdown files in docs/, doc/ or guides/. Public repositories only."}
               </p>
+            </div>
+          )}
+
+          {type === "website" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="source-max-pages" className="text-xs text-[color:var(--text-secondary)]">
+                Maximum pages
+              </Label>
+              <Input
+                id="source-max-pages"
+                type="number"
+                min={1}
+                max={200}
+                value={maxPages}
+                onChange={(e) => setMaxPages(Number(e.target.value) || 1)}
+              />
             </div>
           )}
 
@@ -135,11 +170,11 @@ export function AddSourceDialog({ productId }: { productId: string }) {
               isPending ||
               !name.trim() ||
               (type === "article" && !content.trim()) ||
-              ((type === "url" || type === "github") && !url.trim())
+              (needsUrl && !url.trim())
             }
             className="w-full rounded-lg bg-foreground text-xs text-background hover:bg-foreground/90"
           >
-            {isPending ? "Indexing…" : "Add & Index"}
+            {isPending ? "Adding…" : "Add & index"}
           </Button>
         </div>
       </DialogContent>

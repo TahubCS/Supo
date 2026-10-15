@@ -10,6 +10,9 @@ import { isWorkspaceOwnerRole } from "@/lib/product-access";
 
 import { NewProductDialog } from "./NewProductDialog";
 
+// createProduct starts a website crawl that runs after the response.
+export const maxDuration = 300;
+
 const CATEGORY_LABELS: Record<string, string> = {
   saas: "SaaS",
   "e-commerce": "E-commerce",

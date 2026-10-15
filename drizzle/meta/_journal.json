@@ -134,6 +134,13 @@
       "when": 1778199360000,
       "tag": "0018_repair_knowledge_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778285760000,
+      "tag": "0019_knowledge_pipeline",
+      "breakpoints": true
     }
   ]
 }
