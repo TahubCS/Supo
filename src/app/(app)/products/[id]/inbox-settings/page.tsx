@@ -2,10 +2,12 @@ import { asc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { db } from "@/db";
-import { macro } from "@/db/schema";
+import { macro, slaPolicy, widgetConfig } from "@/db/schema";
+import { getBusinessHours } from "@/lib/sla/service";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
 import { InboxSettings } from "./InboxSettings";
+import { ServiceLevelSettings } from "./ServiceLevelSettings";
 
 export default async function InboxSettingsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -16,6 +18,11 @@ export default async function InboxSettingsPage({ params }: { params: Promise<{ 
     where: eq(macro.productId, id),
     orderBy: [asc(macro.title)],
   });
+  const [hours, policies, widget] = await Promise.all([
+    getBusinessHours(id),
+    db.query.slaPolicy.findMany({ where: eq(slaPolicy.productId, id) }),
+    db.query.widgetConfig.findFirst({ where: eq(widgetConfig.productId, id), columns: { csatEnabled: true } }),
+  ]);
 
   return (
     <div className="mx-auto max-w-4xl px-8 py-8">
@@ -33,6 +40,16 @@ export default async function InboxSettingsPage({ params }: { params: Promise<{ 
           actions: m.actions,
           usageCount: m.usageCount,
         }))}
+      />
+      <ServiceLevelSettings
+        productId={id}
+        businessHours={hours}
+        policies={policies.map((p) => ({
+          priority: p.priority,
+          firstResponseMinutes: p.firstResponseMinutes,
+          resolutionMinutes: p.resolutionMinutes,
+        }))}
+        csatEnabled={widget?.csatEnabled ?? true}
       />
     </div>
   );

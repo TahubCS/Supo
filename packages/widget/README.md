@@ -92,6 +92,12 @@ const supo = createSupoClient({
 });
 
 const reply = await supo.sendMessage("I need help with billing");
+
+// After an agent resolves the conversation, ask for a rating (CSAT).
+supo.on("rating", ({ requested }) => {
+  if (requested) showRatingPrompt();
+});
+await supo.submitRating(5, "Quick and helpful");
 ```
 
 ## Runtime Options

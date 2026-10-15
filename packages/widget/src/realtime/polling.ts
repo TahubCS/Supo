@@ -14,6 +14,8 @@ export type SupoPollResponse = {
   cursor?: number | null;
   escalationStatus: SupoEscalationStatus;
   needsEmail?: boolean;
+  // The conversation was resolved and the customer can rate it (CSAT).
+  ratingRequested?: boolean;
   lastMessageAt: string;
 };
 

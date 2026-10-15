@@ -63,7 +63,7 @@ registerJobHandler(HANDOFF_JOB_TYPES.summarize, async (payload) => {
 });
 
 // ── Email the team when a customer is waiting and nobody is online ─────────
-async function inboxRecipients(productId: string, organizationId: string): Promise<string[]> {
+export async function inboxRecipients(productId: string, organizationId: string): Promise<string[]> {
   const assigned = await db
     .select({ email: user.email })
     .from(productMember)

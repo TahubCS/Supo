@@ -58,6 +58,7 @@ import {
   type Teammate,
 } from "./actions";
 import { CustomerSidebar, PriorityBadge } from "./CustomerSidebar";
+import { RatingBadge, SlaDetails, useNow } from "./SlaBadge";
 import type { ConversationWithDetails, InboxMessage } from "./types";
 
 const MAX_REPLY_LENGTH = 5000;
@@ -239,6 +240,7 @@ export function ConversationThread({
   const [loadingMessages, setLoadingMessages] = useState(Boolean(conversation));
   const [replyBody, setReplyBody] = useState("");
   const [isPending, startTransition] = useTransition();
+  const now = useNow();
   const bottomRef = useRef<HTMLDivElement>(null);
   const lastTypingSentAt = useRef(0);
   const conversationId = conversation?.id ?? null;
@@ -490,10 +492,19 @@ export function ConversationThread({
               </span>
             )}
             <PriorityBadge priority={conv.priority} />
+            <RatingBadge rating={conv.rating} />
           </div>
           <p className="truncate text-xs text-[color:var(--text-secondary)]">
             {conv.customer.email ?? conv.followUpEmail ?? "No email provided"}
           </p>
+          <div className="mt-1 space-y-1">
+            <SlaDetails conv={conv} now={now} />
+            {conv.rating?.comment && (
+              <p className="line-clamp-2 text-xs italic text-[color:var(--text-secondary)]">
+                Customer feedback: &ldquo;{conv.rating.comment}&rdquo;
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">

@@ -117,6 +117,9 @@ export type SupoEventMap = {
   typing: { agentName: string | null };
   // Waiting for a human; `needsEmail` asks the customer for a follow-up address.
   handoff: { availability: SupoAgentAvailability | null; needsEmail: boolean };
+  // The conversation was resolved: ask the customer to rate it (1-5).
+  // `score` is set once the customer has submitted a rating.
+  rating: { requested: boolean; score: number | null };
 };
 
 export type SupoEventName = keyof SupoEventMap;

@@ -33,9 +33,12 @@ function playNotificationSound() {
   }
 }
 
-type ConversationPatch = Partial<Omit<ConversationWithDetails, "lastMessageAt" | "latestMessage" | "snoozedUntil">> & {
+const DATE_FIELDS = ["snoozedUntil", "firstResponseAt", "firstResponseDueAt", "resolutionDueAt", "resolvedAt"] as const;
+type DateField = (typeof DATE_FIELDS)[number];
+
+type ConversationPatch = Partial<Omit<ConversationWithDetails, "lastMessageAt" | "latestMessage" | DateField>> & {
   lastMessageAt?: string;
-  snoozedUntil?: string | null;
+} & Partial<Record<DateField, string | null>> & {
   latestMessage?: { id: string; body: string; senderType: string; createdAt: string };
 };
 
@@ -49,6 +52,7 @@ const PATCHABLE_FIELDS = [
   "aiSummary",
   "handoffReason",
   "followUpEmail",
+  "rating",
 ] as const;
 
 function applyPatch(conversation: ConversationWithDetails, patch: ConversationPatch): ConversationWithDetails {
@@ -57,7 +61,9 @@ function applyPatch(conversation: ConversationWithDetails, patch: ConversationPa
     if (field in patch) (next as Record<string, unknown>)[field] = patch[field] ?? null;
   }
   if (patch.lastMessageAt) next.lastMessageAt = new Date(patch.lastMessageAt);
-  if ("snoozedUntil" in patch) next.snoozedUntil = patch.snoozedUntil ? new Date(patch.snoozedUntil) : null;
+  for (const field of DATE_FIELDS) {
+    if (field in patch) next[field] = patch[field] ? new Date(patch[field]) : null;
+  }
   if (patch.latestMessage) {
     next.latestMessage = { ...patch.latestMessage, createdAt: new Date(patch.latestMessage.createdAt) };
   }

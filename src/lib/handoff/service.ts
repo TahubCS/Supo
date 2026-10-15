@@ -9,6 +9,8 @@ import {
   publishToProductInbox,
 } from "@/lib/ably";
 import { enqueueAndKick } from "@/lib/jobs/queue";
+import { isWithinBusinessHours } from "@/lib/sla/hours";
+import { applySlaTargets, getBusinessHours } from "@/lib/sla/service";
 
 import { HANDOFF_REASON_LABELS } from "./policy";
 import { pickRoundRobinAgent } from "./routing";
@@ -22,6 +24,9 @@ export const HANDOFF_JOB_TYPES = {
 } as const;
 
 export async function getAgentAvailability(orgId: string, productId: string): Promise<AgentAvailability> {
+  // Outside business hours the team is offline, whoever has a tab open.
+  const hours = await getBusinessHours(productId);
+  if (hours.enabled && !isWithinBusinessHours(new Date(), hours)) return "offline";
   const online = await getOnlineAgentCount(orgId, productId);
   if (online === null) return "unknown";
   return online > 0 ? "online" : "offline";
@@ -187,6 +192,11 @@ export async function escalateConversation({
   const followUpEmail = updated[0].followUpEmail ?? customerEmail;
   const needsEmail = availability === "offline" && !followUpEmail;
 
+  const slaTargets = await applySlaTargets(conversationId).catch((error) => {
+    console.error("[sla] could not set targets", error);
+    return null;
+  });
+
   await postSystemMessage({ orgId, productId, conversationId, body: handoffNotice(availability, followUpEmail) });
 
   const assignee = availability === "online" ? await autoAssign(orgId, productId, conversationId) : null;
@@ -241,6 +251,8 @@ export async function escalateConversation({
       assigneeId: null,
       aiHandled: false,
       escalatedAt: now.toISOString(),
+      firstResponseDueAt: slaTargets?.firstResponseDueAt?.toISOString() ?? null,
+      resolutionDueAt: slaTargets?.resolutionDueAt?.toISOString() ?? null,
     }),
   ]);
 

@@ -162,6 +162,13 @@
       "when": 1778544960000,
       "tag": "0022_review_followups",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1778631360000,
+      "tag": "0023_sla_business_hours_csat",
+      "breakpoints": true
     }
   ]
 }

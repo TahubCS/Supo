@@ -1,9 +1,10 @@
-import { and, desc, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { db } from "@/db";
-import { conversation } from "@/db/schema";
+import { conversation, conversationRating } from "@/db/schema";
 import { isRealtimeConfigured } from "@/lib/ably";
+import { drainSoon } from "@/lib/jobs/queue";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
 import { listTeammates } from "./actions";
@@ -35,6 +36,9 @@ export default async function InboxPage({
         lte(conversation.snoozedUntil, new Date()),
       ),
     );
+
+  // Keep background jobs and SLA warnings moving while agents work.
+  drainSoon();
 
   const conversations = await db.query.conversation.findMany({
     where:
@@ -75,9 +79,22 @@ export default async function InboxPage({
     ),
   );
 
+  const ratings = ids.length
+    ? await db
+        .select({
+          conversationId: conversationRating.conversationId,
+          score: conversationRating.score,
+          comment: conversationRating.comment,
+        })
+        .from(conversationRating)
+        .where(inArray(conversationRating.conversationId, ids))
+    : [];
+  const ratingByConversation = new Map(ratings.map((r) => [r.conversationId, { score: r.score, comment: r.comment }]));
+
   const withMessages: ConversationWithDetails[] = conversations.map((conv) => ({
     ...conv,
     latestMessage: latestByConversation.get(conv.id) ?? null,
+    rating: ratingByConversation.get(conv.id) ?? null,
   }));
 
   const teammates = await listTeammates(id);

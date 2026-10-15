@@ -61,6 +61,8 @@ export type ChatView = {
   needsEmail: boolean;
   // Name of the agent currently typing, if any.
   agentTyping: string | null;
+  // CSAT prompt after the conversation was resolved.
+  rating: { requested: boolean; selected: number | null; comment: string; submitting: boolean };
 };
 
 export function renderPanel({
@@ -134,7 +136,10 @@ function renderChat(appearance: Required<SupoAppearance>, messages: SupoMessage[
   if (view.needsEmail && isWaiting) {
     html += `<div id="supo-followup"><input id="supo-followup-email" class="supo-inp" type="email" placeholder="you@example.com" autocomplete="email" aria-label="Email for follow-up" /><button id="supo-followup-btn">Notify me</button></div>`;
   }
-  if (view.canEscalate && connection === "idle") {
+  if (view.rating.requested) {
+    html += renderRating(view.rating);
+  }
+  if (view.canEscalate && connection === "idle" && !view.rating.requested) {
     html += `<button id="supo-escalate-btn">${escapeHtml(appearance.agentHandoffLabel)}</button>`;
   }
 
@@ -147,6 +152,26 @@ function renderChat(appearance: Required<SupoAppearance>, messages: SupoMessage[
   return `${html}<div id="supo-composer"><textarea id="supo-input" placeholder="${escapeHtml(
     placeholder,
   )}" rows="1"${disabled}></textarea><button id="supo-send"${disabled}>Send</button></div>`;
+}
+
+function renderRating(rating: ChatView["rating"]) {
+  const stars = [1, 2, 3, 4, 5]
+    .map(
+      (score) =>
+        `<button class="supo-star${rating.selected !== null && score <= rating.selected ? " supo-star-on" : ""}" data-score="${score}" aria-label="${score} out of 5"${
+          rating.submitting ? " disabled" : ""
+        }>★</button>`,
+    )
+    .join("");
+  const details =
+    rating.selected === null
+      ? ""
+      : `<textarea id="supo-rating-comment" class="supo-inp" rows="2" maxlength="1000" placeholder="Anything we could do better? (optional)">${escapeHtml(
+          rating.comment,
+        )}</textarea><button id="supo-rating-btn"${rating.submitting ? " disabled" : ""}>${
+          rating.submitting ? "Sending…" : "Send feedback"
+        }</button>`;
+  return `<div id="supo-rating"><div class="supo-rating-title">How did we do?</div><div class="supo-stars" role="group" aria-label="Rate this conversation">${stars}</div>${details}</div>`;
 }
 
 function renderIdForm(appearance: Required<SupoAppearance>) {

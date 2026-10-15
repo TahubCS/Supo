@@ -4,6 +4,16 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### SLAs, business hours and CSAT
+
+- **Business hours:** per-product timezone, weekly schedule and holidays (Inbox settings). Handoff availability treats agents as offline outside business hours, so customers get the email follow-up path.
+- **SLA policies:** first-response and resolution targets per priority, counted in business minutes (DST-aware). Due dates are set on handoff and recomputed on priority changes.
+- **Inbox:** live SLA badges ("Reply in 12m", "Reply overdue", "Resolution overdue"), a "Due soon" sort, SLA details in the conversation header, and the customer's rating and feedback.
+- **Breach warnings:** a job-runner sweeper emails inbox members once per conversation 10 minutes before a first-response breach.
+- **CSAT:** the widget asks for a 1–5 rating plus an optional comment after an agent resolves a conversation (`POST /api/widget/ratings`). Can be turned off per product. Widget SDK `0.1.0-alpha.8` adds `submitRating()` and the `rating` event.
+- **Analytics rewrite:** 7/30/90-day windows with previous-period deltas: AI deflection, first-response and resolution p50/p90, SLA attainment, CSAT, knowledge-base answer rate, per-agent table, top unanswered questions, and a CSV export of conversations (formula-injection safe).
+- Migration `0023_sla_business_hours_csat` adds `business_hours`, `sla_policy` and `conversation_rating`, SLA columns on `conversation` and `widget_config.csat_enabled`.
+
 ### Review follow-ups
 
 - **Migrations:** `0017` no longer fails on databases that are missing the knowledge tables; their indexes are created by `0018` instead.

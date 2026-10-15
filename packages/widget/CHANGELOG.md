@@ -2,6 +2,12 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.8
+
+- **Customer satisfaction (CSAT):** when an agent resolves a conversation the widget asks "How did we do?" with a 1–5 star rating and an optional comment.
+- New headless method `submitRating(score, comment?)` and `getRating()`; new `rating` event (`{ requested, score }`), also available as `supo:rating` on `window`.
+- The poll response's `ratingRequested` flag drives the prompt, so it also appears after a page reload.
+
 ## 0.1.0-alpha.7
 
 - `Supo.init(...).on("message", handler)` now fires for messages received from the server (restored history, realtime and polling), once per message id.

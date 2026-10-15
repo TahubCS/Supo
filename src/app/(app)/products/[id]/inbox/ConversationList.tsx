@@ -10,10 +10,14 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 import { bulkResolve, searchConversations } from "./actions";
+import { nextSlaDeadline } from "@/lib/sla/state";
+
 import { PriorityBadge } from "./CustomerSidebar";
+import { RatingBadge, SlaBadge, useNow } from "./SlaBadge";
 import type { ConversationWithDetails } from "./types";
 
 type FilterTab = "waiting" | "mine" | "open" | "resolved" | "all";
+type SortOrder = "recent" | "due";
 
 const TABS: { id: FilterTab; label: string }[] = [
   { id: "waiting", label: "Waiting" },
@@ -41,10 +45,12 @@ function ConversationItem({
   selected,
   checked,
   selectionMode,
+  now,
   onClick,
   onToggleCheck,
 }: {
   conv: ConversationWithDetails;
+  now: Date;
   selected: boolean;
   checked: boolean;
   selectionMode: boolean;
@@ -99,7 +105,7 @@ function ConversationItem({
             </p>
           )}
 
-          <div className="mt-1.5 flex items-center gap-1.5">
+          <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
             {conv.status === "open" ? (
               <Badge
                 variant="outline"
@@ -134,7 +140,9 @@ function ConversationItem({
                 AI
               </span>
             )}
+            <SlaBadge conv={conv} now={now} />
             <PriorityBadge priority={conv.priority} />
+            <RatingBadge rating={conv.rating} />
             {conv.tags.slice(0, 2).map((tag) => (
               <span key={tag} className="truncate rounded-full bg-[color:var(--card-elevated)] px-1.5 py-px text-[10px] text-[color:var(--text-secondary)]">
                 {tag}
@@ -173,6 +181,8 @@ export function ConversationList({
   const [serverMatches, setServerMatches] = useState<{ query: string; ids: Set<string> }>({ query: "", ids: new Set() });
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
+  const [sortOrder, setSortOrder] = useState<SortOrder>("recent");
+  const now = useNow();
 
   // Full-text search over message bodies runs on the server (debounced).
   useEffect(() => {
@@ -214,8 +224,15 @@ export function ConversationList({
           c.latestMessage?.body.toLowerCase().includes(q),
       );
     }
+    if (sortOrder === "due") {
+      // Earliest SLA deadline first; conversations without one keep recency order.
+      list = [...list].sort((a, b) => {
+        const diff = nextSlaDeadline(a) - nextSlaDeadline(b);
+        return Number.isNaN(diff) || diff === 0 ? b.lastMessageAt.getTime() - a.lastMessageAt.getTime() : diff;
+      });
+    }
     return list;
-  }, [conversations, tab, query, currentUserId, serverMatches]);
+  }, [conversations, tab, query, currentUserId, serverMatches, sortOrder]);
 
   // Keyboard navigation: j / k move through the list.
   useEffect(() => {
@@ -289,7 +306,7 @@ export function ConversationList({
           </div>
         )}
 
-        <div className="relative">
+        <div className="relative flex items-center gap-2">
           <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
           <Input
             placeholder="Search messages, customers, tags…"
@@ -297,6 +314,15 @@ export function ConversationList({
             onChange={(e) => setQuery(e.target.value)}
             className="h-8 pl-8 text-xs"
           />
+          <select
+            aria-label="Sort conversations"
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as SortOrder)}
+            className="h-8 shrink-0 rounded-md border border-border bg-transparent px-1.5 text-xs text-[color:var(--text-secondary)]"
+          >
+            <option value="recent">Recent</option>
+            <option value="due">Due soon</option>
+          </select>
         </div>
 
         <div className="flex overflow-hidden rounded-lg border border-border">
@@ -347,6 +373,7 @@ export function ConversationList({
                 selected={conv.id === selectedId}
                 checked={checked.has(conv.id)}
                 selectionMode={checked.size > 0}
+                now={now}
                 onClick={() => onSelect(conv.id)}
                 onToggleCheck={() => toggleChecked(conv.id)}
               />
