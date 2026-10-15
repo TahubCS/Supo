@@ -4,7 +4,7 @@ import { env } from "@/lib/env";
 
 let client: Resend | null = null;
 
-function getClient(): Resend {
+export function getClient(): Resend {
   client ??= new Resend(env.RESEND_API_KEY.trim());
   return client;
 }
@@ -35,6 +35,34 @@ export async function sendEmail({
     subject: subject.replace(/[\r\n]+/g, " ").slice(0, 200),
     html,
     replyTo,
+  });
+  if (response.error) throw new Error(response.error.message);
+  return response.data?.id ?? "";
+}
+
+/** Sends a conversation email with explicit From and threading headers. */
+export async function sendThreadedEmail({
+  from,
+  to,
+  subject,
+  text,
+  html,
+  headers,
+}: {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  headers: Record<string, string>;
+}): Promise<string> {
+  const response = await getClient().emails.send({
+    from,
+    to,
+    subject: subject.replace(/[\r\n]+/g, " ").slice(0, 200),
+    text,
+    html,
+    headers,
   });
   if (response.error) throw new Error(response.error.message);
   return response.data?.id ?? "";

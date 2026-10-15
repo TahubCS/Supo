@@ -122,6 +122,19 @@ drizzle/                           SQL migrations
 - **Webhooks:** HMAC-signed (`Supo-Signature`) deliveries for conversation, message, rating and article events. Retries go through the job queue with backoff, there is a per-endpoint delivery log with redelivery and a "Send test" button, and failing endpoints are paused automatically. Outbound requests use the SSRF-safe client.
 - Manage both under **Integrations**. Full reference: [`docs/API.md`](docs/API.md).
 
+## Email Channel and Privacy
+
+- **Email channel** (Inbox settings): each product gets an inbound address on `INBOUND_EMAIL_DOMAIN`, and you forward your support mailbox to it.
+  - **Inbound:** Resend's signed `email.received` webhook queues a job that fetches the email, strips quoted history and opens or continues a conversation. Threading matches our Message-IDs, then the customer's own `References`, then sender + subject.
+  - **Routing:** emails go straight to the team, with SLAs and routing.
+  - **Outbound:** agent replies (dashboard or API) are emailed from the product address with `In-Reply-To`/`References` headers.
+  - **Filtering:** auto-replies, bounces and mail loops are ignored.
+- **GDPR tools:**
+  - product admins can export a customer's data (JSON) or erase the customer and all their conversations from the inbox sidebar
+  - the API has `GET /customers/{id}/export` and `DELETE /customers/{id}`
+  - erasure also removes webhook delivery logs that copied the data
+- **Data retention** (Inbox settings, admins): resolved conversations older than N days are deleted automatically, along with customers left without conversations. Webhook delivery logs are kept for 30 days.
+
 ## SLAs, Business Hours and CSAT
 
 - **Business hours** (Inbox settings): a timezone, a weekly schedule and holidays. Outside business hours customers are told the team will follow up by email, even if someone is signed in.
@@ -176,6 +189,7 @@ Notes:
 - `BETTER_AUTH_URL` must match the deployed app URL in production.
 - `BETTER_AUTH_ADMIN_USER_IDS` should contain only the trusted owner/admin Better Auth user id.
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
+- The email channel is optional. Set `INBOUND_EMAIL_DOMAIN` (a receiving domain in Resend) and `RESEND_WEBHOOK_SECRET` (the signing secret of a Resend webhook for `email.received` pointed at `/api/inbound/email`).
 - `ABLY_API_KEY` enables realtime inbox/widget updates. The widget keeps polling as a fallback if Ably is absent.
 - `CRON_SECRET` authorizes Vercel Cron and internal job routes. Vercel sends it as `Authorization: Bearer $CRON_SECRET` automatically when the variable is set on the project.
 - `DATABASE_SSL=disable` (or `sslmode=disable` in the URL) turns off TLS for a local Postgres.

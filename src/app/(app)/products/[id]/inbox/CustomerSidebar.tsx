@@ -1,7 +1,7 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { Flag, Tag, User, X } from "lucide-react";
+import { Download, Flag, ShieldCheck, Tag, Trash2, User, X } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import type { ConversationPriority } from "@/lib/conversations/fields";
 
 import { getCustomerProfile, setConversationPriority, setConversationTags, type CustomerProfile } from "./actions";
+import { eraseCustomerData, exportCustomer } from "./privacy-actions";
 import type { ConversationWithDetails } from "./types";
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -30,11 +31,15 @@ export function PriorityBadge({ priority }: { priority: string }) {
 export function CustomerSidebar({
   conversation,
   canEdit,
+  isAdmin,
   onSelectConversation,
   onChange,
+  onErased,
 }: {
   conversation: ConversationWithDetails;
   canEdit: boolean;
+  isAdmin: boolean;
+  onErased: () => void;
   onSelectConversation: (id: string) => void;
   onChange: (patch: Partial<Pick<ConversationWithDetails, "priority" | "tags">>) => void;
 }) {
@@ -205,6 +210,60 @@ export function CustomerSidebar({
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {isAdmin && (
+        <section>
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-[color:var(--text-tertiary)]">
+            <ShieldCheck className="size-3" /> Privacy
+          </p>
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() =>
+                startTransition(async () => {
+                  try {
+                    const json = await exportCustomer(conversation.productId, conversation.customer.id);
+                    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `customer-${conversation.customer.id}.json`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Export failed");
+                  }
+                })
+              }
+              className="flex items-center gap-1.5 rounded-md border border-border px-2 py-1.5 text-xs text-foreground hover:bg-[color:var(--card-elevated)]"
+            >
+              <Download className="size-3.5" /> Export customer data
+            </button>
+            <button
+              type="button"
+              disabled={isPending}
+              onClick={() => {
+                const typed = prompt(
+                  `This permanently deletes ${conversation.customer.name} and all of their conversations in every product. Type ERASE to confirm.`,
+                );
+                if (typed !== "ERASE") return;
+                startTransition(async () => {
+                  try {
+                    const result = await eraseCustomerData(conversation.productId, conversation.customer.id);
+                    toast.success(`Customer erased (${result.conversations} conversation${result.conversations === 1 ? "" : "s"})`);
+                    onErased();
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Erase failed");
+                  }
+                });
+              }}
+              className="flex items-center gap-1.5 rounded-md border border-red-500/40 px-2 py-1.5 text-xs text-red-500 hover:bg-red-500/10"
+            >
+              <Trash2 className="size-3.5" /> Erase customer
+            </button>
+          </div>
         </section>
       )}
     </aside>

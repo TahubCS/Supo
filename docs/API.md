@@ -56,6 +56,8 @@ Customers belong to the workspace and are shared by its products.
 | POST | `/customers` | Upsert, matched by `externalId`, then `email`. Body: `{ externalId?, email?, name?, avatarUrl?, locale?, timezone? }`. Returns 201 when created. |
 | GET | `/customers/{id}` | |
 | PATCH | `/customers/{id}` | Same fields as POST |
+| GET | `/customers/{id}/export` | Everything stored about the customer across the workspace: profile, conversations, messages, ratings (GDPR access request) |
+| DELETE | `/customers/{id}` | Permanently erases the customer and all of their conversations in every product of the workspace, plus webhook logs that contain them (GDPR erasure). Returns 204. |
 
 ## Knowledge base
 

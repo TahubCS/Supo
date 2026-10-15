@@ -3,8 +3,9 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { businessHours, macro, product, slaPolicy, widgetConfig, type MacroActions } from "@/db/schema";
+import { businessHours, emailChannel, macro, product, slaPolicy, widgetConfig, type MacroActions } from "@/db/schema";
 import { recordProductAudit } from "@/lib/audit";
+import { generateAddressLocal, inboundAddress, isEmailChannelConfigured } from "@/lib/email-channel/service";
 import { isValidTimeZone, normalizeSchedule } from "@/lib/sla/hours";
 import { requireProductAccess } from "@/lib/product-access";
 
@@ -223,4 +224,64 @@ export async function saveCsatEnabled(productId: string, enabled: boolean): Prom
     targetType: "product",
     targetId: productId,
   });
+}
+
+// ── Email channel ──────────────────────────────────────────────────────────
+
+export async function saveEmailChannel(
+  productId: string,
+  input: { enabled: boolean; fromName: string },
+): Promise<{ ok: true; address: string | null } | { ok: false; error: string }> {
+  try {
+    const access = await requireSettings(productId);
+    if (!isEmailChannelConfigured()) {
+      return { ok: false, error: "Set INBOUND_EMAIL_DOMAIN and RESEND_WEBHOOK_SECRET on the server first" };
+    }
+    const now = new Date();
+    const fromName = input.fromName.trim().replace(/["<>\r\n]/g, "").slice(0, 60) || null;
+    const existing = await db.query.emailChannel.findFirst({ where: eq(emailChannel.productId, productId) });
+    const addressLocal = existing?.addressLocal ?? generateAddressLocal(access.product.name);
+    await db
+      .insert(emailChannel)
+      .values({ productId, enabled: input.enabled, addressLocal, fromName, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: emailChannel.productId, set: { enabled: input.enabled, fromName, updatedAt: now } });
+    await recordProductAudit({
+      productId,
+      actor: { id: access.session.user.id, name: access.session.user.name },
+      action: "email_channel.updated",
+      targetType: "email_channel",
+      targetId: productId,
+      metadata: { enabled: input.enabled },
+    });
+    return { ok: true, address: inboundAddress(addressLocal) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not save" };
+  }
+}
+
+// ── Data retention ─────────────────────────────────────────────────────────
+
+export async function saveDataRetention(
+  productId: string,
+  days: number | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const access = await requireSettings(productId);
+    if (access.role !== "admin") return { ok: false, error: "Only product admins can change data retention" };
+    if (days !== null && (!Number.isInteger(days) || days < 7 || days > 3650)) {
+      return { ok: false, error: "Retention must be between 7 and 3650 days" };
+    }
+    await db.update(product).set({ dataRetentionDays: days, updatedAt: new Date() }).where(eq(product.id, productId));
+    await recordProductAudit({
+      productId,
+      actor: { id: access.session.user.id, name: access.session.user.name },
+      action: "data_retention.updated",
+      targetType: "product",
+      targetId: productId,
+      metadata: { days },
+    });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not save" };
+  }
 }

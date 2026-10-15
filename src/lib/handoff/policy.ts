@@ -106,4 +106,5 @@ export const HANDOFF_REASON_LABELS: Record<string, string> = {
   repeated_unanswered: "AI couldn't answer repeated questions",
   agent: "Taken over by an agent",
   manual: "Customer pressed “talk to a person”",
+  email: "New email",
 };

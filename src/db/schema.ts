@@ -219,6 +219,8 @@ export const product = pgTable("product", {
   routingMode: text("routing_mode").notNull().default("manual"),
   // Round-robin skips agents already handling this many active conversations.
   maxConcurrentChats: integer("max_concurrent_chats").notNull().default(5),
+  // Resolved conversations older than this are deleted (null = keep forever).
+  dataRetentionDays: integer("data_retention_days"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
@@ -501,6 +503,8 @@ export const message = pgTable("message", {
   sources: jsonb("sources").$type<MessageSource[]>(),
   // Monotonic cursor for lossless polling (timestamps can collide or commit out of order).
   seq: bigserial("seq", { mode: "number" }).notNull(),
+  // Message-ID header of emailed messages (email channel).
+  emailMessageId: text("email_message_id"),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -924,4 +928,20 @@ export const webhookDelivery = pgTable(
     deliveredAt: timestamp("delivered_at"),
   },
   (table) => [index("webhook_delivery_endpoint_created_idx").on(table.endpointId, table.createdAt)],
+);
+
+export const emailChannel = pgTable(
+  "email_channel",
+  {
+    productId: text("product_id")
+      .primaryKey()
+      .references(() => product.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    // Local part of the inbound address: {addressLocal}@INBOUND_EMAIL_DOMAIN
+    addressLocal: text("address_local").notNull(),
+    fromName: text("from_name"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("email_channel_address_idx").on(table.addressLocal)],
 );
