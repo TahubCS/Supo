@@ -3,8 +3,9 @@
 import { and, eq } from "drizzle-orm";
 
 import { db } from "@/db";
-import { macro, product, type MacroActions } from "@/db/schema";
+import { businessHours, macro, product, slaPolicy, widgetConfig, type MacroActions } from "@/db/schema";
 import { recordProductAudit } from "@/lib/audit";
+import { isValidTimeZone, normalizeSchedule } from "@/lib/sla/hours";
 import { requireProductAccess } from "@/lib/product-access";
 
 export type MacroInput = {
@@ -133,5 +134,93 @@ export async function saveRoutingSettings(
     targetType: "product",
     targetId: productId,
     metadata: { routingMode, maxConcurrentChats },
+  });
+}
+
+export type BusinessHoursInput = {
+  enabled: boolean;
+  timezone: string;
+  schedule: Record<string, { start: string; end: string }[]>;
+  holidays: string[];
+};
+
+export async function saveBusinessHours(productId: string, input: BusinessHoursInput): Promise<void> {
+  const access = await requireSettings(productId);
+  if (!isValidTimeZone(input.timezone)) throw new Error("Unknown timezone");
+  const schedule = normalizeSchedule(input.schedule);
+  const holidays = [...new Set((input.holidays ?? []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].slice(0, 100);
+  const now = new Date();
+  await db
+    .insert(businessHours)
+    .values({ productId, enabled: Boolean(input.enabled), timezone: input.timezone, schedule, holidays, updatedAt: now })
+    .onConflictDoUpdate({
+      target: businessHours.productId,
+      set: { enabled: Boolean(input.enabled), timezone: input.timezone, schedule, holidays, updatedAt: now },
+    });
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "business_hours.updated",
+    targetType: "product",
+    targetId: productId,
+    metadata: { enabled: input.enabled, timezone: input.timezone },
+  });
+}
+
+export type SlaPolicyInput = { priority: string; firstResponseMinutes: number | null; resolutionMinutes: number | null };
+
+export async function saveSlaPolicies(productId: string, policies: SlaPolicyInput[]): Promise<void> {
+  const access = await requireSettings(productId);
+  const now = new Date();
+  for (const priority of ["low", "normal", "high", "urgent"]) {
+    const input = policies.find((p) => p.priority === priority);
+    const first = input?.firstResponseMinutes ? Math.round(input.firstResponseMinutes) : null;
+    const resolution = input?.resolutionMinutes ? Math.round(input.resolutionMinutes) : null;
+    if (!first || first < 1) {
+      await db.delete(slaPolicy).where(and(eq(slaPolicy.productId, productId), eq(slaPolicy.priority, priority)));
+      continue;
+    }
+    if (first > 60 * 24 * 30 || (resolution !== null && (resolution < first || resolution > 60 * 24 * 90))) {
+      throw new Error(`Invalid SLA for ${priority} priority`);
+    }
+    await db
+      .insert(slaPolicy)
+      .values({
+        id: crypto.randomUUID(),
+        productId,
+        priority,
+        firstResponseMinutes: first,
+        resolutionMinutes: resolution,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [slaPolicy.productId, slaPolicy.priority],
+        set: { firstResponseMinutes: first, resolutionMinutes: resolution, updatedAt: now },
+      });
+  }
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "sla.updated",
+    targetType: "product",
+    targetId: productId,
+    metadata: { policies },
+  });
+}
+
+export async function saveCsatEnabled(productId: string, enabled: boolean): Promise<void> {
+  const access = await requireSettings(productId);
+  const now = new Date();
+  await db
+    .insert(widgetConfig)
+    .values({ id: crypto.randomUUID(), productId, csatEnabled: enabled, createdAt: now, updatedAt: now })
+    .onConflictDoUpdate({ target: widgetConfig.productId, set: { csatEnabled: enabled, updatedAt: now } });
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: enabled ? "csat.enabled" : "csat.disabled",
+    targetType: "product",
+    targetId: productId,
   });
 }

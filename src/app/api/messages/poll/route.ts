@@ -3,7 +3,9 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { conversation, customer, message, product, user, widgetConfig } from "@/db/schema";
+import { shouldRequestRating } from "@/lib/csat/service";
 import { maybeNotifyHandoffTimeout } from "@/lib/handoff/service";
+import { drainSoon } from "@/lib/jobs/queue";
 import {
   getSecurityIp,
   isSecurityQuotaError,
@@ -167,6 +169,9 @@ export async function GET(req: NextRequest) {
     db.query.customer.findFirst({ where: eq(customer.id, conv.customerId), columns: { email: true } }),
   ]);
   if (conv.escalationStatus === "pending") {
+    // Customers waiting for a human keep the job queue (and SLA warnings)
+    // moving between cron runs. Throttled per instance.
+    drainSoon();
     await maybeNotifyHandoffTimeout({
       orgId: foundProduct.organizationId,
       productId,
@@ -177,13 +182,26 @@ export async function GET(req: NextRequest) {
   }
   const fresh = await db.query.conversation.findFirst({
     where: eq(conversation.id, conv.id),
-    columns: { escalationStatus: true, handoffTimeoutNotifiedAt: true, followUpEmail: true, lastMessageAt: true },
+    columns: {
+      escalationStatus: true,
+      handoffTimeoutNotifiedAt: true,
+      followUpEmail: true,
+      lastMessageAt: true,
+      status: true,
+      resolvedAt: true,
+    },
   });
   const escalationStatus = fresh?.escalationStatus ?? conv.escalationStatus;
   const needsEmail =
     escalationStatus === "pending" &&
     Boolean(fresh?.handoffTimeoutNotifiedAt) &&
     !(fresh?.followUpEmail ?? cust?.email);
+  const ratingRequested = await shouldRequestRating({
+    id: conv.id,
+    productId,
+    status: fresh?.status ?? conv.status,
+    resolvedAt: fresh ? fresh.resolvedAt : conv.resolvedAt,
+  }).catch(() => false);
 
   return NextResponse.json(
     {
@@ -199,6 +217,7 @@ export async function GET(req: NextRequest) {
       cursor: rows.at(-1)?.seq ?? afterSeq,
       escalationStatus,
       needsEmail,
+      ratingRequested,
       lastMessageAt: (fresh?.lastMessageAt ?? conv.lastMessageAt).toISOString(),
     },
     { headers: CORS },

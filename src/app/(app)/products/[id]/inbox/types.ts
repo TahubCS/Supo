@@ -29,6 +29,9 @@ export type ConversationWithDetails = {
   tags: string[];
   channel: string;
   firstResponseAt: Date | null;
+  firstResponseDueAt: Date | null;
+  resolutionDueAt: Date | null;
+  resolvedAt: Date | null;
   subject: string | null;
   lastMessageAt: Date;
   createdAt: Date;
@@ -40,4 +43,6 @@ export type ConversationWithDetails = {
     senderType: string;
     createdAt: Date;
   } | null;
+  // Customer satisfaction rating, once the customer has rated the conversation.
+  rating: { score: number; comment: string | null } | null;
 };

@@ -39,6 +39,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   let escalationStatus: SupoEscalationStatus = null;
   let needsEmail = false;
   let agentTyping: string | null = null;
+  let rating = { requested: false, selected: null as number | null, comment: "", submitting: false };
   let typingTimer: ReturnType<typeof setTimeout> | null = null;
   const emittedMessageIds = new Set<string>();
 
@@ -62,6 +63,13 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
     }),
     headless.on("handoff", (handoff) => {
       needsEmail = handoff.needsEmail;
+      render();
+    }),
+    headless.on("rating", (next) => {
+      emitter.emit("rating", next);
+      rating = next.requested
+        ? { ...rating, requested: true }
+        : { requested: false, selected: null, comment: "", submitting: false };
       render();
     }),
     headless.on("typing", ({ agentName }) => {
@@ -150,6 +158,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
         canEscalate: messages.some((m) => m.role === "ai" || m.role === "customer"),
         needsEmail,
         agentTyping: connection === "agent_active" ? agentTyping : null,
+        rating,
       },
     })}${renderBubble({
       isOpen,
@@ -175,6 +184,21 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
     });
     shadow.querySelector("#supo-followup-email")?.addEventListener("keydown", (event) => {
       if ((event as KeyboardEvent).key === "Enter") void submitFollowUp();
+    });
+
+    shadow.querySelectorAll<HTMLButtonElement>(".supo-star").forEach((star) => {
+      star.addEventListener("click", () => {
+        rating = { ...rating, selected: Number(star.dataset.score) };
+        render();
+        shadow.querySelector<HTMLTextAreaElement>("#supo-rating-comment")?.focus();
+      });
+    });
+    shadow.querySelector<HTMLTextAreaElement>("#supo-rating-comment")?.addEventListener("input", (event) => {
+      // Keep the draft across re-renders.
+      rating.comment = (event.target as HTMLTextAreaElement).value;
+    });
+    shadow.querySelector("#supo-rating-btn")?.addEventListener("click", () => {
+      void submitRating();
     });
 
     const input = shadow.querySelector<HTMLTextAreaElement>("#supo-input");
@@ -244,6 +268,22 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
       emitError(error);
       input?.classList.add("supo-error");
     }
+  }
+
+  async function submitRating() {
+    const score = rating.selected;
+    if (score === null || rating.submitting) return;
+    rating = { ...rating, submitting: true };
+    render();
+    try {
+      await headless.submitRating(score, rating.comment);
+      // The "rating" event clears the prompt.
+      messages = appendUnique(messages, { role: "system", body: "Thanks for your feedback!" });
+    } catch (error) {
+      emitError(error);
+      rating = { ...rating, submitting: false };
+    }
+    render();
   }
 
   async function send() {
@@ -329,6 +369,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
       connection = "idle";
       escalationStatus = null;
       needsEmail = false;
+      rating = { requested: false, selected: null, comment: "", submitting: false };
       emittedMessageIds.clear();
       clearAgentTyping();
       render();

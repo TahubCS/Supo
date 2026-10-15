@@ -70,6 +70,8 @@ export function createSupoClient(
   let escalationStatus: SupoEscalationStatus = null;
   let availability: SupoAgentAvailability | null = null;
   let needsEmail = false;
+  let ratingRequested = false;
+  let ratingScore: number | null = null;
 
   function conversation() {
     return storage.getConversation(customer);
@@ -94,6 +96,13 @@ export function createSupoClient(
     availability = nextAvailability;
     needsEmail = nextNeedsEmail;
     emitter.emit("handoff", { availability, needsEmail });
+  }
+
+  function setRatingRequested(requested: boolean) {
+    if (requested === ratingRequested) return;
+    ratingRequested = requested;
+    if (requested) ratingScore = null;
+    emitter.emit("rating", { requested, score: ratingScore });
   }
 
   function emitServerMessage(data: {
@@ -128,6 +137,7 @@ export function createSupoClient(
     ablyConnected = false;
     lastSeq = 0;
     setEscalationStatus(null);
+    setRatingRequested(false);
   }
 
   async function pollOnce() {
@@ -151,6 +161,7 @@ export function createSupoClient(
     const data = (await response.json()) as SupoPollResponse;
     setEscalationStatus(data.escalationStatus);
     setHandoff({ needsEmail: Boolean(data.needsEmail) });
+    setRatingRequested(Boolean(data.ratingRequested));
     for (const message of data.messages) emitServerMessage(message);
     if (typeof data.cursor === "number" && data.cursor > lastSeq) lastSeq = data.cursor;
     return data;
@@ -214,9 +225,16 @@ export function createSupoClient(
         emitServerMessage(msg.data as Parameters<typeof emitServerMessage>[0]);
       });
       await channel.subscribe("escalation_update", (msg) => {
-        const data = msg.data as { status?: SupoEscalationStatus; availability?: SupoAgentAvailability; needsEmail?: boolean };
+        const data = msg.data as {
+          status?: SupoEscalationStatus;
+          availability?: SupoAgentAvailability;
+          needsEmail?: boolean;
+          resolved?: boolean;
+        };
         setEscalationStatus(data.status === "pending" || data.status === "active" ? data.status : null);
         setHandoff({ availability: data.availability ?? availability, needsEmail: Boolean(data.needsEmail) });
+        // The poll response says whether a rating should be requested.
+        if (data.resolved) void pollOnce().catch(() => {});
       });
       await channel.subscribe("typing", (msg) => {
         const data = msg.data as { agentName?: string };
@@ -249,6 +267,8 @@ export function createSupoClient(
     const trimmed = body.trim();
     if (!trimmed) throw new Error("Message cannot be empty.");
     const ref = conversation();
+    // Writing again reopens a resolved conversation.
+    setRatingRequested(false);
     const response = await fetch(joinUrl(apiBaseUrl, "/api/widget/messages"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -356,6 +376,31 @@ export function createSupoClient(
     if (!ablyConnected) void pollOnce().catch(() => {});
   }
 
+  /** Rates a resolved conversation from 1 to 5, with an optional comment (CSAT). */
+  async function submitRating(score: number, comment?: string) {
+    if (!Number.isInteger(score) || score < 1 || score > 5) throw new Error("Rating must be a whole number from 1 to 5.");
+    const ref = conversation();
+    if (!ref.id || !ref.token) throw new Error("A conversation is required.");
+    const response = await fetch(joinUrl(apiBaseUrl, "/api/widget/ratings"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        productId: options.productId,
+        conversationId: ref.id,
+        conversationToken: ref.token,
+        score,
+        comment: comment?.trim() || undefined,
+      }),
+    });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(data.error ?? `Supo rating failed: ${response.status}`);
+    }
+    ratingRequested = false;
+    ratingScore = score;
+    emitter.emit("rating", { requested: false, score });
+  }
+
   function identify(nextCustomer: SupoCustomer): boolean {
     const normalized = normalizeCustomer(nextCustomer);
     if (!normalized) return false;
@@ -384,6 +429,8 @@ export function createSupoClient(
     escalationStatus = null;
     availability = null;
     needsEmail = false;
+    ratingRequested = false;
+    ratingScore = null;
     customer = null;
     storage.clear();
   }
@@ -393,6 +440,7 @@ export function createSupoClient(
     sendMessageWithSources,
     escalate,
     submitFollowUpEmail,
+    submitRating,
     identify,
     resume,
     reset,
@@ -403,6 +451,7 @@ export function createSupoClient(
     getConversation: conversation,
     getEscalationStatus: () => escalationStatus,
     getHandoff: () => ({ availability, needsEmail }),
+    getRating: () => ({ requested: ratingRequested, score: ratingScore }),
     on: <EventName extends SupoEventName>(event: EventName, handler: SupoEventHandler<EventName>) =>
       emitter.on(event, handler),
     destroy() {

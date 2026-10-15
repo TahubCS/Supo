@@ -28,6 +28,32 @@ export function registerJobHandler(type: string, handler: JobHandler) {
   handlers.set(type, handler);
 }
 
+// Periodic checks (e.g. SLA breach warnings) that run whenever the queue is
+// drained by cron or opportunistically.
+type Sweeper = () => Promise<void>;
+const sweepers = new Map<string, Sweeper>();
+
+export function registerSweeper(name: string, sweeper: Sweeper) {
+  sweepers.set(name, sweeper);
+}
+
+// Sweepers scan tables, so run them at most once a minute per instance even
+// when drains are frequent.
+const SWEEP_INTERVAL_MS = 60_000;
+let lastSweepAt = 0;
+
+async function runSweepers() {
+  if (Date.now() - lastSweepAt < SWEEP_INTERVAL_MS) return;
+  lastSweepAt = Date.now();
+  for (const [name, sweeper] of sweepers) {
+    try {
+      await sweeper();
+    } catch (error) {
+      console.error(`[jobs] sweeper ${name} failed`, error);
+    }
+  }
+}
+
 // Handlers live in feature modules that import this file; load the registry
 // lazily (dynamic import avoids a circular import at module load) so a job can
 // run from any route, whichever modules that route happened to import.
@@ -221,6 +247,7 @@ export async function drainJobs({
 }: { maxJobs?: number; deadlineMs?: number } = {}) {
   const startedAt = Date.now();
   await ensureHandlersLoaded();
+  await runSweepers();
   const recovered = await recoverStaleJobs();
   const results = { recovered, done: 0, retried: 0, failed: 0 };
 

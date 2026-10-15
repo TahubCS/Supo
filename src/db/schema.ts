@@ -372,6 +372,8 @@ export const widgetConfig = pgTable("widget_config", {
   identitySecret: text("identity_secret"),
   // "off" | "optional" | "required"
   identityVerification: text("identity_verification").notNull().default("off"),
+  // Ask customers to rate the conversation when it is resolved.
+  csatEnabled: boolean("csat_enabled").notNull().default(true),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
@@ -451,6 +453,10 @@ export const conversation = pgTable(
     channel: text("channel").notNull().default("widget"),
     // First human reply after the conversation was handed off (SLA tracking).
     firstResponseAt: timestamp("first_response_at"),
+    // SLA targets computed from the product's policy and business hours.
+    firstResponseDueAt: timestamp("first_response_due_at"),
+    resolutionDueAt: timestamp("resolution_due_at"),
+    slaWarningSentAt: timestamp("sla_warning_sent_at"),
     publicAccessToken: text("public_access_token").notNull(),
     subject: text("subject"),
     lastMessageAt: timestamp("last_message_at").notNull(),
@@ -459,6 +465,10 @@ export const conversation = pgTable(
   },
   (table) => [
     uniqueIndex("conversation_public_access_token_idx").on(table.publicAccessToken),
+    // Used by the SLA breach-warning sweeper (migration 0023).
+    index("conversation_first_response_due_idx")
+      .on(table.firstResponseDueAt)
+      .where(sql`${table.firstResponseAt} IS NULL AND ${table.firstResponseDueAt} IS NOT NULL`),
   ],
 );
 
@@ -698,4 +708,53 @@ export const productAuditLog = pgTable(
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [index("product_audit_log_product_created_idx").on(table.productId, table.createdAt)],
+);
+
+export const businessHours = pgTable("business_hours", {
+  productId: text("product_id")
+    .primaryKey()
+    .references(() => product.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(false),
+  timezone: text("timezone").notNull().default("UTC"),
+  // { mon: [{ start: "09:00", end: "17:00" }], ... }
+  schedule: jsonb("schedule").$type<Record<string, { start: string; end: string }[]>>().notNull(),
+  holidays: text("holidays").array().notNull().default(sql`'{}'::text[]`),
+  updatedAt: timestamp("updated_at").notNull(),
+});
+
+// Per-priority SLA targets. No row for a priority = no SLA for it.
+export const slaPolicy = pgTable(
+  "sla_policy",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    priority: text("priority").notNull(),
+    firstResponseMinutes: integer("first_response_minutes").notNull(),
+    resolutionMinutes: integer("resolution_minutes"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("sla_policy_product_priority_idx").on(table.productId, table.priority)],
+);
+
+export const conversationRating = pgTable(
+  "conversation_rating",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .unique()
+      .references(() => conversation.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => product.id, { onDelete: "cascade" }),
+    // Agent who resolved the conversation (for per-agent CSAT).
+    agentId: text("agent_id").references(() => user.id, { onDelete: "set null" }),
+    score: integer("score").notNull(), // 1-5
+    comment: text("comment"),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("conversation_rating_product_created_idx").on(table.productId, table.createdAt)],
 );

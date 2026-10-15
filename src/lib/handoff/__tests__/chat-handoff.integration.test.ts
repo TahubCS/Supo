@@ -28,6 +28,7 @@ vi.mock("@/lib/ably", () => ({
   getOnlineAgentUserIds: async () => onlineAgentIds,
 }));
 vi.mock("@/lib/jobs/queue", () => ({
+  drainSoon: () => {},
   enqueueAndKick: async (type: string, payload: Record<string, unknown>) => {
     enqueued.push({ type, payload });
     return "job";

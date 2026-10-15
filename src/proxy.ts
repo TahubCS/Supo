@@ -27,7 +27,12 @@ const MAX_CHAT_BODY_BYTES = 16 * 1024;
 // Public, unauthenticated widget endpoints. Legacy paths and their
 // /api/widget/* aliases share handlers and must share protections.
 const WIDGET_SEND_PATHS = new Set(["/api/chat", "/api/widget/messages"]);
-const WIDGET_ESCALATE_PATHS = new Set(["/api/chat/escalate", "/api/widget/escalations", "/api/widget/contact"]);
+const WIDGET_ESCALATE_PATHS = new Set([
+  "/api/chat/escalate",
+  "/api/widget/escalations",
+  "/api/widget/contact",
+  "/api/widget/ratings",
+]);
 const WIDGET_READ_PATHS = new Set([
   "/api/widget/config",
   "/api/messages/poll",

@@ -17,6 +17,7 @@ import {
   type MacroActions,
 } from "@/db/schema";
 import { recordProductAudit } from "@/lib/audit";
+import { getConversationRating } from "@/lib/csat/service";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import { postSystemMessage, HANDOFF_JOB_TYPES } from "@/lib/handoff/service";
 import { enqueueAndKick } from "@/lib/jobs/queue";
@@ -30,6 +31,7 @@ import {
   type ProductAccess,
 } from "@/lib/product-access";
 import { requireSecurityQuota } from "@/lib/security";
+import { applySlaTargets } from "@/lib/sla/service";
 
 import type { ConversationWithDetails, InboxMessage } from "./types";
 
@@ -168,7 +170,13 @@ export async function getConversationForInbox(conversationId: string): Promise<C
     }),
   ]);
   if (!cust) return null;
-  return { ...conv, customer: cust, latestMessage: latest ?? null };
+  const rating = await getConversationRating(conv.id);
+  return {
+    ...conv,
+    customer: cust,
+    latestMessage: latest ?? null,
+    rating: rating ? { score: rating.score, comment: rating.comment } : null,
+  };
 }
 
 export type Teammate = { id: string; name: string; role: string };
@@ -390,7 +398,7 @@ export async function resolveConversation(conversationId: string): Promise<void>
   await publishLifecycle(
     access,
     conv,
-    { status: "resolved", escalationStatus: null, assigneeId: null, aiHandled: true },
+    { status: "resolved", escalationStatus: null, assigneeId: null, aiHandled: true, resolvedAt: now.toISOString() },
     { status: null, resolved: true },
   );
   await audit(access, conv, "conversation.resolved");
@@ -549,6 +557,7 @@ export async function sendMessage(conversationId: string, rawBody: string): Prom
       aiHandled: false,
       lastMessageAt: event.createdAt,
       latestMessage: event,
+      firstResponseAt: conv.firstResponseAt?.toISOString() ?? event.createdAt,
     }),
   ]);
 
@@ -644,7 +653,17 @@ export async function setConversationPriority(conversationId: string, priority: 
   assertCanUseConversation(access, conv);
   if (!PRIORITIES.includes(priority)) throw new Error("Invalid priority");
   await db.update(conversation).set({ priority, updatedAt: new Date() }).where(eq(conversation.id, conversationId));
-  await publishLifecycle(access, conv, { priority });
+  // Priority drives the SLA target; recompute it from the handoff time.
+  const targets = conv.escalatedAt ? await applySlaTargets(conversationId) : null;
+  await publishLifecycle(access, conv, {
+    priority,
+    ...(targets
+      ? {
+          firstResponseDueAt: targets.firstResponseDueAt?.toISOString() ?? null,
+          resolutionDueAt: targets.resolutionDueAt?.toISOString() ?? null,
+        }
+      : {}),
+  });
   await audit(access, conv, "conversation.priority_changed", { from: conv.priority, to: priority });
 }
 

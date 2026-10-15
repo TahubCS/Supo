@@ -108,6 +108,13 @@ drizzle/                           SQL migrations
 - **Inbox settings:** manual claiming or round-robin routing with a per-agent cap, and macro management.
 - **Activity:** recent customer threads, plus a product audit log for admins and developers.
 
+## SLAs, Business Hours and CSAT
+
+- **Business hours** (Inbox settings): a timezone, a weekly schedule and holidays. Outside business hours customers are told the team will follow up by email, even if someone is signed in.
+- **SLA targets** per priority (first response and resolution, in business minutes). Due dates are set when a conversation is handed to a human and recomputed when its priority changes. The inbox shows countdown and breach badges and can sort by "Due soon". The job runner emails the team once, 10 minutes before a first-response breach.
+- **CSAT:** when an agent resolves a conversation, the widget asks for a 1–5 rating and an optional comment (`POST /api/widget/ratings`, conversation-token auth, 7-day window). Ratings show in the inbox and are credited to the resolving agent. Turn it off under Inbox settings.
+- **Analytics:** 7/30/90-day windows (days in the business-hours timezone) compared with the previous period: AI deflection, first-response and resolution medians and p90, SLA attainment, CSAT, knowledge-base answer rate, per-agent performance, top unanswered questions and a conversation-level CSV export.
+
 ## Security Posture
 
 Supo currently includes early-stage SaaS hardening:
