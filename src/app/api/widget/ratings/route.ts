@@ -8,6 +8,7 @@ import { isCsatEnabled, isWithinRatingWindow, parseRatingInput, submitRating } f
 import { isSecurityQuotaError, requireSecurityQuota } from "@/lib/security";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
 import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { emitConversationEvent } from "@/lib/webhooks/service";
 import { checkWidgetOrigin } from "@/lib/widget-origin";
 
 const METHODS = "POST, OPTIONS";
@@ -96,6 +97,10 @@ export async function POST(req: NextRequest) {
     conversationId: conv.id,
     rating: { score: rating.score, comment: rating.comment },
   }).catch(() => {});
+
+  await emitConversationEvent("rating.created", conv.id, {
+    rating: { score: rating.score, comment: rating.comment, agentId: rating.agentId, createdAt: rating.createdAt.toISOString() },
+  });
 
   return NextResponse.json({ ok: true, score: rating.score }, { headers: CORS });
 }

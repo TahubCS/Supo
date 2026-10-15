@@ -1,21 +1,20 @@
 "use server";
 
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 
 import { db } from "@/db";
 import { article, articleCategory, articleVersion, helpCenter } from "@/db/schema";
 import { recordProductAudit } from "@/lib/audit";
-import { resyncPublishedArticles, syncArticleKnowledge } from "@/lib/help-center/sync";
 import {
-  isValidHelpCenterSlug,
-  isValidSlug,
-  MAX_ARTICLE_BODY,
-  MAX_SUMMARY,
-  MAX_TITLE,
-  nextAvailableSlug,
-  slugify,
-} from "@/lib/help-center/text";
+  createArticleRecord,
+  deleteArticleRecord,
+  setArticleStatusRecord,
+  updateArticleRecord,
+  type ArticleInput,
+} from "@/lib/help-center/articles";
+import { resyncPublishedArticles } from "@/lib/help-center/sync";
+import { isValidHelpCenterSlug, nextAvailableSlug, slugify } from "@/lib/help-center/text";
 import { parseUploadedFile, UploadError } from "@/lib/knowledge/parse-file";
 import { requireProductAccess, type ProductAccess } from "@/lib/product-access";
 
@@ -181,36 +180,14 @@ export async function moveCategory(productId: string, categoryId: string, direct
 
 // ── Articles ───────────────────────────────────────────────────────────────
 
-async function takenSlugs(productId: string, excludeId?: string) {
-  const rows = await db
-    .select({ slug: article.slug })
-    .from(article)
-    .where(excludeId ? and(eq(article.productId, productId), ne(article.id, excludeId)) : eq(article.productId, productId));
-  return rows.map((r) => r.slug);
-}
-
 export async function createArticle(
   productId: string,
   input: { title?: string; bodyMd?: string; categoryId?: string | null } = {},
 ): Promise<Result<string>> {
   try {
     const access = await requireHelpCenter(productId);
-    const title = (input.title?.trim() || "Untitled article").slice(0, MAX_TITLE);
-    const id = crypto.randomUUID();
-    const now = new Date();
-    await db.insert(article).values({
-      id,
-      productId,
-      categoryId: input.categoryId ?? null,
-      title,
-      slug: nextAvailableSlug(slugify(title) || "article", await takenSlugs(productId)),
-      bodyMd: (input.bodyMd ?? "").slice(0, MAX_ARTICLE_BODY),
-      status: "draft",
-      authorId: access.session.user.id,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await audit(access, "help_center.article_created", "article", id, { title });
+    const id = await createArticleRecord(productId, access.session.user.id, input);
+    await audit(access, "help_center.article_created", "article", id, { title: input.title });
     revalidate(productId);
     return { ok: true, value: id };
   } catch (error) {
@@ -218,77 +195,10 @@ export async function createArticle(
   }
 }
 
-export type ArticleInput = {
-  title: string;
-  slug: string;
-  summary: string;
-  bodyMd: string;
-  categoryId: string | null;
-};
-
-// A new version snapshot is kept at most this often while someone is editing.
-const VERSION_INTERVAL_MS = 10 * 60 * 1000;
-
 export async function saveArticle(articleId: string, input: ArticleInput): Promise<Result<{ slug: string }>> {
   try {
     const { row, access } = await requireArticle(articleId);
-    const title = input.title.trim().slice(0, MAX_TITLE);
-    if (!title) return { ok: false, error: "Title is required" };
-    if (input.bodyMd.length > MAX_ARTICLE_BODY) {
-      return { ok: false, error: `Articles are limited to ${MAX_ARTICLE_BODY.toLocaleString()} characters` };
-    }
-    const slug = (input.slug.trim().toLowerCase() || slugify(title) || "article").slice(0, 80);
-    if (!isValidSlug(slug)) return { ok: false, error: "The URL can only contain lowercase letters, numbers and hyphens" };
-    if ((await takenSlugs(row.productId, row.id)).includes(slug)) {
-      return { ok: false, error: "Another article already uses that URL" };
-    }
-    if (input.categoryId) {
-      const category = await db.query.articleCategory.findFirst({
-        where: and(eq(articleCategory.id, input.categoryId), eq(articleCategory.productId, row.productId)),
-        columns: { id: true },
-      });
-      if (!category) return { ok: false, error: "Category not found" };
-    }
-    const summary = input.summary.trim().slice(0, MAX_SUMMARY) || null;
-    const changed = row.title !== title || row.bodyMd !== input.bodyMd || (row.summary ?? null) !== summary;
-
-    const now = new Date();
-    await db.transaction(async (tx) => {
-      if (changed && row.bodyMd.trim()) {
-        const [latest] = await tx
-          .select({ createdAt: articleVersion.createdAt, authorId: articleVersion.authorId })
-          .from(articleVersion)
-          .where(eq(articleVersion.articleId, row.id))
-          .orderBy(desc(articleVersion.createdAt))
-          .limit(1);
-        // Snapshot the previous content so it can be restored.
-        if (!latest || latest.authorId !== access.session.user.id || now.getTime() - latest.createdAt.getTime() > VERSION_INTERVAL_MS) {
-          await tx.insert(articleVersion).values({
-            id: crypto.randomUUID(),
-            articleId: row.id,
-            title: row.title,
-            summary: row.summary,
-            bodyMd: row.bodyMd,
-            authorId: row.authorId,
-            createdAt: now,
-          });
-        }
-      }
-      await tx
-        .update(article)
-        .set({
-          title,
-          slug,
-          summary,
-          bodyMd: input.bodyMd,
-          categoryId: input.categoryId,
-          authorId: changed ? access.session.user.id : row.authorId,
-          updatedAt: now,
-        })
-        .where(eq(article.id, row.id));
-    });
-
-    if (row.status === "published") await syncArticleKnowledge(row.id);
+    const slug = await updateArticleRecord(row, access.session.user.id, input);
     revalidate(row.productId);
     return { ok: true, value: { slug } };
   } catch (error) {
@@ -299,15 +209,7 @@ export async function saveArticle(articleId: string, input: ArticleInput): Promi
 export async function setArticleStatus(articleId: string, status: "draft" | "published"): Promise<Result> {
   try {
     const { row, access } = await requireArticle(articleId);
-    if (status === "published" && !row.bodyMd.trim()) {
-      return { ok: false, error: "Write something before publishing" };
-    }
-    const now = new Date();
-    await db
-      .update(article)
-      .set({ status, publishedAt: status === "published" ? (row.publishedAt ?? now) : row.publishedAt, updatedAt: now })
-      .where(eq(article.id, row.id));
-    await syncArticleKnowledge(row.id);
+    await setArticleStatusRecord(row, status);
     await audit(access, status === "published" ? "help_center.article_published" : "help_center.article_unpublished", "article", row.id, {
       title: row.title,
     });
@@ -321,10 +223,7 @@ export async function setArticleStatus(articleId: string, status: "draft" | "pub
 export async function deleteArticle(articleId: string): Promise<Result> {
   try {
     const { row, access } = await requireArticle(articleId);
-    // Unpublish first so the knowledge base copy is removed.
-    await db.update(article).set({ status: "draft" }).where(eq(article.id, row.id));
-    await syncArticleKnowledge(row.id);
-    await db.delete(article).where(eq(article.id, row.id));
+    await deleteArticleRecord(row);
     await audit(access, "help_center.article_deleted", "article", row.id, { title: row.title });
     revalidate(row.productId);
     return { ok: true };
@@ -340,15 +239,15 @@ export async function restoreArticleVersion(articleId: string, versionId: string
       where: and(eq(articleVersion.id, versionId), eq(articleVersion.articleId, row.id)),
     });
     if (!version) return { ok: false, error: "Version not found" };
-    const result = await saveArticle(row.id, {
+    await updateArticleRecord(row, access.session.user.id, {
       title: version.title,
       slug: row.slug,
       summary: version.summary ?? "",
       bodyMd: version.bodyMd,
       categoryId: row.categoryId,
     });
-    if (!result.ok) return result;
     await audit(access, "help_center.article_restored", "article", row.id, { versionId });
+    revalidate(row.productId);
     return { ok: true };
   } catch (error) {
     return { ok: false, error: message(error) };

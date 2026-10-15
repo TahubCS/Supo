@@ -17,7 +17,9 @@ import {
   type MacroActions,
 } from "@/db/schema";
 import { recordProductAudit } from "@/lib/audit";
+import { normalizeTags, PRIORITIES, type ConversationPriority } from "@/lib/conversations/fields";
 import { getConversationRating } from "@/lib/csat/service";
+import { emitConversationEvent, emitWebhookEvent, messageData } from "@/lib/webhooks/service";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
 import { postSystemMessage, HANDOFF_JOB_TYPES } from "@/lib/handoff/service";
 import { enqueueAndKick } from "@/lib/jobs/queue";
@@ -256,6 +258,10 @@ export async function claimConversation(conversationId: string): Promise<void> {
     { status: "active", agentName: name },
   );
   await audit(access, conv, "conversation.claimed");
+  await emitConversationEvent("conversation.assigned", conversationId, {
+    assignee: { id: access.session.user.id, name },
+    assignedBy: { id: access.session.user.id, name },
+  });
 }
 
 /** Kept for older clients. */
@@ -292,6 +298,11 @@ export async function takeOverConversation(conversationId: string): Promise<void
     { status: "active", agentName: name },
   );
   await audit(access, conv, "conversation.taken_over", { previousAssigneeId: conv.assigneeId });
+  await emitConversationEvent("conversation.assigned", conversationId, {
+    assignee: { id: access.session.user.id, name },
+    assignedBy: { id: access.session.user.id, name },
+    previousAssigneeId: conv.assigneeId,
+  });
 }
 
 /** Transfers to a teammate, or returns the conversation to the queue (assigneeId = null). */
@@ -315,6 +326,11 @@ export async function assignConversation(conversationId: string, assigneeId: str
       { status: "pending" },
     );
     await audit(access, conv, "conversation.returned_to_queue");
+    await emitConversationEvent("conversation.assigned", conversationId, {
+      assignee: null,
+      assignedBy: { id: access.session.user.id, name: access.session.user.name },
+      previousAssigneeId: conv.assigneeId,
+    });
     return;
   }
 
@@ -344,6 +360,11 @@ export async function assignConversation(conversationId: string, assigneeId: str
     { status: "active", agentName: target?.name ?? null },
   );
   await audit(access, conv, "conversation.transferred", { from: conv.assigneeId, to: assigneeId });
+  await emitConversationEvent("conversation.assigned", conversationId, {
+    assignee: { id: assigneeId, name: target?.name ?? null },
+    assignedBy: { id: access.session.user.id, name: access.session.user.name },
+    previousAssigneeId: conv.assigneeId,
+  });
 }
 
 /** Ends the human handoff; the AI assistant answers again. */
@@ -402,6 +423,9 @@ export async function resolveConversation(conversationId: string): Promise<void>
     { status: null, resolved: true },
   );
   await audit(access, conv, "conversation.resolved");
+  await emitConversationEvent("conversation.resolved", conversationId, {
+    resolvedBy: { id: access.session.user.id, name: access.session.user.name },
+  });
 
   if (access.role !== "agent") {
     after(() =>
@@ -561,6 +585,12 @@ export async function sendMessage(conversationId: string, rawBody: string): Prom
     }),
   ]);
 
+  await emitWebhookEvent(
+    conv.productId,
+    "message.created",
+    messageData({ id, conversationId, senderType: "agent", senderId: userId, body, createdAt: saved.createdAt }),
+  );
+
   // Email the reply if the customer has left the widget.
   const lastSeen = conv.customerLastSeenAt?.getTime() ?? 0;
   if (Date.now() - lastSeen > 2 * 60 * 1000) {
@@ -635,18 +665,6 @@ export async function addInternalNote(conversationId: string, rawBody: string): 
 
 // ── Priority & tags ─────────────────────────────────────────────────────────
 
-const PRIORITIES = ["low", "normal", "high", "urgent"] as const;
-export type ConversationPriority = (typeof PRIORITIES)[number];
-
-function normalizeTags(tags: string[]): string[] {
-  return [
-    ...new Set(
-      tags
-        .map((tag) => tag.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, ""))
-        .filter((tag) => tag.length > 0 && tag.length <= 32),
-    ),
-  ].slice(0, 12);
-}
 
 export async function setConversationPriority(conversationId: string, priority: ConversationPriority): Promise<void> {
   const { conv, ...access } = await verifyConversationAccess(conversationId);

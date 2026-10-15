@@ -13,7 +13,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { MAX_ARTICLE_BODY, MAX_SUMMARY } from "@/lib/help-center/text";
 
-import { deleteArticle, restoreArticleVersion, saveArticle, setArticleStatus, type ArticleInput } from "../../actions";
+import type { ArticleInput } from "@/lib/help-center/articles";
+
+import { deleteArticle, restoreArticleVersion, saveArticle, setArticleStatus } from "../../actions";
 
 type EditorArticle = ArticleInput & { id: string; status: "draft" | "published"; updatedAt: Date };
 

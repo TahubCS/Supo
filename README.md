@@ -116,6 +116,12 @@ drizzle/                           SQL migrations
 - Article Markdown is rendered with `react-markdown` (no raw HTML, unsafe URL schemes stripped).
 - The Knowledge page's **File** source type uses the same document parser.
 
+## API and Webhooks
+
+- **REST API** (`/api/v1`): conversations, messages and notes, customers, knowledge sources and search, and help center articles. Authenticated with product-scoped API keys (`supo_sk_…`, stored as SHA-256 hashes), with per-scope permissions, optional expiry, revocation, last-used tracking and per-key rate limits.
+- **Webhooks:** HMAC-signed (`Supo-Signature`) deliveries for conversation, message, rating and article events. Retries go through the job queue with backoff, there is a per-endpoint delivery log with redelivery and a "Send test" button, and failing endpoints are paused automatically. Outbound requests use the SSRF-safe client.
+- Manage both under **Integrations**. Full reference: [`docs/API.md`](docs/API.md).
+
 ## SLAs, Business Hours and CSAT
 
 - **Business hours** (Inbox settings): a timezone, a weekly schedule and holidays. Outside business hours customers are told the team will follow up by email, even if someone is signed in.
