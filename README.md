@@ -92,6 +92,14 @@ drizzle/                           SQL migrations
 - Reviewers can write answers to gaps and approve them into the knowledge base, or reject them.
 - Re-indexing swaps chunks atomically, so the previous index keeps serving if a refresh fails.
 
+## Human Handoff
+
+- **When:** the customer asks for a person, is frustrated, or the knowledge base misses twice in a row (`src/lib/handoff/policy.ts`). Customers can also press "talk to a person".
+- **While waiting:** the AI keeps helping and the customer can keep typing. Agents see the conversation live in the inbox's **Waiting** view, with an AI-written summary and the handoff reason.
+- **Nobody online:** the customer is told the team will follow up by email (and asked for an address if needed), and inbox members are emailed. After the product's wait time (Widget → Human handoff), a reminder goes out.
+- **Agents:** claim (atomic), take over, transfer, return to queue, hand back to AI, snooze, resolve. System messages keep the customer informed. If the customer has left, agent replies are also emailed to them.
+- **Identity verification:** generate a secret under Widget → Identity verification, then compute `HMAC-SHA256(secret, externalId ?? email)` on your server and pass it as `customer.userHash`. Verified customers can resume their conversations across devices; without verification, a conversation can only be resumed with its private token.
+
 ## Security Posture
 
 Supo currently includes early-stage SaaS hardening:

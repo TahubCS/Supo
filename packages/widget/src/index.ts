@@ -1,5 +1,6 @@
 export { initSupo } from "./dom/mount";
 export type {
+  SupoAgentAvailability,
   SupoAppearance,
   SupoCustomer,
   SupoEscalationStatus,

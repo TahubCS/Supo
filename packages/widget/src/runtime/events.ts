@@ -1,6 +1,8 @@
 import type { SupoEventHandler, SupoEventMap, SupoEventName, SupoHooks } from "../types";
 
-export function createEmitter(hooks?: SupoHooks) {
+// `windowEvents: false` is used by the headless client when it is embedded in
+// the DOM widget, so hooks and supo:* window events fire exactly once.
+export function createEmitter(hooks?: SupoHooks, { windowEvents = true }: { windowEvents?: boolean } = {}) {
   const listeners = new Map<SupoEventName, Set<SupoEventHandler>>();
 
   function emit<EventName extends SupoEventName>(
@@ -8,7 +10,7 @@ export function createEmitter(hooks?: SupoHooks) {
     payload: SupoEventMap[EventName],
   ) {
     listeners.get(event)?.forEach((handler) => handler(payload));
-    if (typeof window !== "undefined") {
+    if (windowEvents && typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent(`supo:${event}`, { detail: payload }));
     }
 

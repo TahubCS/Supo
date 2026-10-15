@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  bigserial,
   boolean,
   customType,
   index,
@@ -361,6 +362,12 @@ export const widgetConfig = pgTable("widget_config", {
   showPoweredBy: boolean("show_powered_by").notNull().default(true),
   // Browser origins allowed to call the public widget API. Empty = any origin.
   allowedOrigins: text("allowed_origins").array().notNull().default(sql`'{}'::text[]`),
+  // Seconds a customer waits for an agent before being told the team will follow up by email.
+  handoffTimeoutSec: integer("handoff_timeout_sec").notNull().default(300),
+  // HMAC-SHA256 secret for identity verification (customer.userHash). Null = disabled.
+  identitySecret: text("identity_secret"),
+  // "off" | "optional" | "required"
+  identityVerification: text("identity_verification").notNull().default("off"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
@@ -417,6 +424,22 @@ export const conversation = pgTable(
     aiHandled: boolean("ai_handled").notNull().default(true),
     escalationStatus: text("escalation_status"), // null | "pending" | "active"
     escalatedAt: timestamp("escalated_at"),
+    // "customer_request" | "repeated_unanswered" | "frustration" | "agent" | ...
+    handoffReason: text("handoff_reason"),
+    // Consecutive substantive customer questions the knowledge base could not answer.
+    unansweredStreak: integer("unanswered_streak").notNull().default(0),
+    // Short AI summary for the agent picking up the conversation.
+    aiSummary: text("ai_summary"),
+    // Set when the "we'll follow up by email" notice was posted after a handoff wait.
+    handoffTimeoutNotifiedAt: timestamp("handoff_timeout_notified_at"),
+    // Email to follow up on when the customer leaves before an agent replies.
+    followUpEmail: text("follow_up_email"),
+    customerLastSeenAt: timestamp("customer_last_seen_at"),
+    customerNotifiedAt: timestamp("customer_notified_at"),
+    identityVerified: boolean("identity_verified").notNull().default(false),
+    snoozedUntil: timestamp("snoozed_until"),
+    resolvedAt: timestamp("resolved_at"),
+    resolvedById: text("resolved_by_id").references(() => user.id, { onDelete: "set null" }),
     publicAccessToken: text("public_access_token").notNull(),
     subject: text("subject"),
     lastMessageAt: timestamp("last_message_at").notNull(),
@@ -455,6 +478,8 @@ export const message = pgTable("message", {
   senderId: text("sender_id").references(() => user.id, { onDelete: "set null" }),
   // Knowledge citations attached to AI answers.
   sources: jsonb("sources").$type<MessageSource[]>(),
+  // Monotonic cursor for lossless polling (timestamps can collide or commit out of order).
+  seq: bigserial("seq", { mode: "number" }).notNull(),
   createdAt: timestamp("created_at").notNull(),
 });
 

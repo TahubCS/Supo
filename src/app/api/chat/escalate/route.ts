@@ -2,19 +2,15 @@ import { eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { conversation, product } from "@/db/schema";
-import { publishToConversation, publishToProductInbox } from "@/lib/ably";
+import { customer, product } from "@/db/schema";
+import { escalateConversation } from "@/lib/handoff/service";
 import {
   isSecurityQuotaError,
   requireSecurityQuota,
   safeQuotaKey,
 } from "@/lib/security";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
-import {
-  normalizeWidgetCustomer,
-  resolveWidgetCustomer,
-  type WidgetCustomerInput,
-} from "@/lib/widget-customer";
+import { normalizeWidgetCustomer, type WidgetCustomerInput } from "@/lib/widget-customer";
 import { widgetCorsHeaders } from "@/lib/widget-cors";
 import { checkWidgetOrigin } from "@/lib/widget-origin";
 
@@ -84,65 +80,33 @@ export async function POST(req: NextRequest) {
     throw error;
   }
 
-  // Verify the conversation belongs to this product and customer.
-  const resolvedCustomer = await resolveWidgetCustomer({
-    organizationId: foundProduct.organizationId,
-    input: customerInfo,
-  });
-  if (!resolvedCustomer) {
-    return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
-  }
-  const cust = resolvedCustomer.customer;
-
-  const conv = await findWidgetConversation({
-    conversationId,
-    productId,
-    conversationToken,
-    customerId: cust.id,
-  });
+  // The 64-character conversation token is the bearer credential.
+  const conv = await findWidgetConversation({ conversationId, productId, conversationToken });
   if (!conv) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const cust = await db.query.customer.findFirst({
+    where: eq(customer.id, conv.customerId),
+    columns: { name: true, email: true },
+  });
 
-  // Already escalated — return current status without re-escalating.
-  if (conv.escalationStatus === "pending" || conv.escalationStatus === "active") {
-    return NextResponse.json(
-      { ok: true, escalationStatus: conv.escalationStatus },
-      { headers: CORS },
-    );
-  }
+  const result = await escalateConversation({
+    orgId: foundProduct.organizationId,
+    productId,
+    conversationId: conv.id,
+    reason: "manual",
+    subject: conv.subject,
+    customerName: cust?.name ?? "Customer",
+    customerEmail: cust?.email ?? null,
+  });
 
-  const now = new Date();
-  await db
-    .update(conversation)
-    .set({
-      escalationStatus: "pending",
-      escalatedAt: now,
-      aiHandled: false,
-      assigneeId: null,
-      updatedAt: now,
-    })
-    .where(eq(conversation.id, conv.id));
-
-  // Publish real-time events — fire-and-forget; never block the API response.
-  Promise.allSettled([
-    publishToConversation(foundProduct.organizationId, productId, conv.id, "escalation_update", {
-      status: "pending",
-    }),
-    publishToProductInbox(foundProduct.organizationId, productId, "needs_agent", {
-      conversationId: conv.id,
-      subject: conv.subject,
-      customerName: cust.name,
-      escalatedAt: now.toISOString(),
-    }),
-    publishToProductInbox(foundProduct.organizationId, productId, "conversation_updated", {
-      conversationId: conv.id,
-      status: "open",
-      escalationStatus: "pending",
-      assigneeId: null,
-      aiHandled: false,
-    }),
-  ]).catch(() => {});
-
-  return NextResponse.json({ ok: true, escalationStatus: "pending" }, { headers: CORS });
+  return NextResponse.json(
+    {
+      ok: true,
+      escalationStatus: result.escalationStatus ?? "pending",
+      availability: result.availability,
+      needsEmail: result.needsEmail,
+    },
+    { headers: CORS },
+  );
 }
