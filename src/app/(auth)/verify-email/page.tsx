@@ -45,14 +45,18 @@ function VerifyEmailContent() {
         </p>
       )}
 
-      <p className="mb-6 text-sm text-[color:var(--text-secondary)]">
+      <p className="mb-3 text-sm text-[color:var(--text-secondary)]">
         Click the link in the email to activate your account. The link expires
         in 24 hours.
       </p>
 
+      <p className="mb-6 text-xs text-[color:var(--text-tertiary)]">
+        Don&apos;t see it? Please check your spam or junk folder.
+      </p>
+
       {resent ? (
         <p className="mb-4 text-sm text-[color:var(--text-secondary)]">
-          Verification email resent.
+          Verification email resent. Be sure to check your spam folder as well.
         </p>
       ) : (
         <Button

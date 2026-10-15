@@ -135,7 +135,7 @@ function SignInContent() {
             </p>
             {resendSent ? (
               <p className="text-[color:var(--text-secondary)]">
-                Verification email sent — check your inbox.
+                Verification email sent — check your inbox and spam folder.
               </p>
             ) : (
               <button
