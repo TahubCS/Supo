@@ -2,10 +2,12 @@ import { asc, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 
 import { db } from "@/db";
-import { macro, slaPolicy, widgetConfig } from "@/db/schema";
+import { emailChannel, macro, slaPolicy, widgetConfig } from "@/db/schema";
+import { inboundAddress, isEmailChannelConfigured } from "@/lib/email-channel/service";
 import { getBusinessHours } from "@/lib/sla/service";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 
+import { ChannelPrivacySettings } from "./ChannelPrivacySettings";
 import { InboxSettings } from "./InboxSettings";
 import { ServiceLevelSettings } from "./ServiceLevelSettings";
 
@@ -18,10 +20,11 @@ export default async function InboxSettingsPage({ params }: { params: Promise<{ 
     where: eq(macro.productId, id),
     orderBy: [asc(macro.title)],
   });
-  const [hours, policies, widget] = await Promise.all([
+  const [hours, policies, widget, channel] = await Promise.all([
     getBusinessHours(id),
     db.query.slaPolicy.findMany({ where: eq(slaPolicy.productId, id) }),
     db.query.widgetConfig.findFirst({ where: eq(widgetConfig.productId, id), columns: { csatEnabled: true } }),
+    db.query.emailChannel.findFirst({ where: eq(emailChannel.productId, id) }),
   ]);
 
   return (
@@ -50,6 +53,17 @@ export default async function InboxSettingsPage({ params }: { params: Promise<{ 
           resolutionMinutes: p.resolutionMinutes,
         }))}
         csatEnabled={widget?.csatEnabled ?? true}
+      />
+      <ChannelPrivacySettings
+        productId={id}
+        emailConfigured={isEmailChannelConfigured()}
+        email={
+          channel
+            ? { enabled: channel.enabled, fromName: channel.fromName ?? "", address: inboundAddress(channel.addressLocal) }
+            : null
+        }
+        retentionDays={access.product.dataRetentionDays}
+        canEditRetention={access.role === "admin"}
       />
     </div>
   );

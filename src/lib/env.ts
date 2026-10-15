@@ -68,4 +68,12 @@ export const env = {
   get CRON_SECRET() {
     return optionalEnv("CRON_SECRET");
   },
+  // Email channel: the domain whose inbound mail Resend forwards to Supo
+  // (e.g. "inbound.example.com"), and the signing secret of that Resend webhook.
+  get INBOUND_EMAIL_DOMAIN() {
+    return optionalEnv("INBOUND_EMAIL_DOMAIN")?.toLowerCase();
+  },
+  get RESEND_WEBHOOK_SECRET() {
+    return optionalEnv("RESEND_WEBHOOK_SECRET");
+  },
 };

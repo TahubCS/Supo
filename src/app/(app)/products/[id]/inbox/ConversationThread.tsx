@@ -794,7 +794,9 @@ export function ConversationThread({
               placeholder={
                 composerMode === "note"
                   ? "Write a note for your team…"
-                  : macros.length > 0
+                  : conv.channel === "email"
+                    ? "Reply by email…  (⌘/Ctrl + Enter to send)"
+                    : macros.length > 0
                     ? "Reply…  Type / for macros, ⌘/Ctrl + Enter to send"
                     : "Reply…  (⌘/Ctrl + Enter to send)"
               }
@@ -851,8 +853,10 @@ export function ConversationThread({
     <CustomerSidebar
       conversation={conv}
       canEdit={canViewThread}
+      isAdmin={productRole === "admin"}
       onSelectConversation={onSelectConversation}
       onChange={(patch) => onConversationChange(patch)}
+      onErased={() => window.location.reload()}
     />
     </div>
   );
