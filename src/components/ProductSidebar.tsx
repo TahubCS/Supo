@@ -9,6 +9,7 @@ import {
   LogOut,
   MessageSquare,
   MousePointerClick,
+  SlidersHorizontal,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -49,6 +50,7 @@ export function ProductSidebar({
   const navItems = [
     { href: `${base}/inbox`, icon: MessageSquare, label: "Conversations", roles: ["admin", "developer", "agent"] },
     { href: `${base}/activity`, icon: MousePointerClick, label: "User activity", roles: ["admin", "developer", "agent"] },
+    { href: `${base}/inbox-settings`, icon: SlidersHorizontal, label: "Inbox settings", roles: ["admin", "developer"] },
     { href: `${base}/knowledge`, icon: BookOpen, label: "Knowledge", roles: ["admin", "developer"] },
     { href: `${base}/widget`, icon: Code2, label: "Widget", roles: ["admin", "developer"] },
     { href: `${base}/docs`, icon: FileText, label: "Setup guide", roles: ["admin", "developer"] },

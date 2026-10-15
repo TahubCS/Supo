@@ -21,6 +21,7 @@ const roleCapabilities: Record<ProductRole, Set<string>> = {
     "analytics",
     "developerDocs",
     "inbox",
+    "inboxSettings",
     "knowledge",
     "team",
     "userActivity",
@@ -29,6 +30,7 @@ const roleCapabilities: Record<ProductRole, Set<string>> = {
   developer: new Set([
     "developerDocs",
     "inbox",
+    "inboxSettings",
     "knowledge",
     "userActivity",
     "widget",

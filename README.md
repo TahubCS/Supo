@@ -100,6 +100,14 @@ drizzle/                           SQL migrations
 - **Agents:** claim (atomic), take over, transfer, return to queue, hand back to AI, snooze, resolve. System messages keep the customer informed. If the customer has left, agent replies are also emailed to them.
 - **Identity verification:** generate a secret under Widget → Identity verification, then compute `HMAC-SHA256(secret, externalId ?? email)` on your server and pass it as `customer.userHash`. Verified customers can resume their conversations across devices; without verification, a conversation can only be resumed with its private token.
 
+## Agent Workspace
+
+- **Inbox views:** Waiting, Mine, Open, Resolved and All, with full-text search, bulk resolve and `j`/`k` navigation.
+- **Composer:** reply or internal note, `/` macros with variables and actions, and "Draft with AI" grounded in the knowledge base.
+- **Customer sidebar:** priority, tags, profile, identity verification status and previous conversations.
+- **Inbox settings:** manual claiming or round-robin routing with a per-agent cap, and macro management.
+- **Activity:** recent customer threads, plus a product audit log for admins and developers.
+
 ## Security Posture
 
 Supo currently includes early-stage SaaS hardening:
