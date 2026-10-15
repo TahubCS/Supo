@@ -25,7 +25,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   const apiBaseUrl = resolveApiBaseUrl(options);
   const storage = createStorage(options.productId);
   const emitter = createEmitter(options.hooks);
-  const headless = createSupoClient(options);
+  const headless = createSupoClient(options, { embedded: true });
   const host = document.createElement("div");
   host.id = "supo-widget-host";
   const shadow = host.attachShadow({ mode: "open" });
@@ -37,24 +37,50 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   let connection: ConnectionState = "idle";
   let messages: SupoMessage[] = [];
   let escalationStatus: SupoEscalationStatus = null;
+  let needsEmail = false;
+  let agentTyping: string | null = null;
+  let typingTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const unsubscribers = [
+    headless.on("message", (message) => {
+      messages = reconcileMessage(messages, message);
+      if (message.role === "agent") {
+        clearAgentTyping();
+        setEscalationStatus("active");
+      }
+      render();
+    }),
+    headless.on("escalation-change", ({ status }) => {
+      setEscalationStatus(status);
+      render();
+    }),
+    headless.on("handoff", (handoff) => {
+      needsEmail = handoff.needsEmail;
+      render();
+    }),
+    headless.on("typing", ({ agentName }) => {
+      agentTyping = agentName || "Support";
+      if (typingTimer) clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => {
+        agentTyping = null;
+        render();
+      }, 5000);
+      render();
+    }),
+    headless.on("error", (payload) => emitter.emit("error", payload)),
+  ];
+
+  function clearAgentTyping() {
+    agentTyping = null;
+    if (typingTimer) clearTimeout(typingTimer);
+    typingTimer = null;
+  }
 
   if (customer) {
     storage.setCustomer(customer);
+    // identify() restores history and live updates for a stored conversation.
     headless.identify(customer);
   }
-
-  const unsubscribeMessage = headless.on("message", (message) => {
-    if (message.role === "agent") {
-      messages = appendUnique(messages, message);
-      connection = "agent_active";
-      setEscalationStatus("active");
-      render();
-    }
-  });
-  const unsubscribeEscalation = headless.on("escalation-change", ({ status }) => {
-    setEscalationStatus(status);
-    render();
-  });
 
   void loadWidgetConfig({ apiBaseUrl, productId: options.productId })
     .then((config) => {
@@ -91,12 +117,17 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
     emitter.emit("error", { message });
   }
 
+  function connectionFor(status: SupoEscalationStatus): ConnectionState {
+    if (status === "pending") return "waiting_agent";
+    if (status === "active") return "agent_active";
+    return "idle";
+  }
+
   function setEscalationStatus(status: SupoEscalationStatus) {
     if (escalationStatus === status) return;
     escalationStatus = status;
-    if (status === "pending") connection = "waiting_agent";
-    if (status === "active") connection = "agent_active";
-    if (status === null && connection !== "streaming") connection = "idle";
+    if (connection !== "streaming") connection = connectionFor(status);
+    if (status !== "pending") needsEmail = false;
     emitter.emit("escalation-change", { status });
     emitState();
   }
@@ -108,7 +139,12 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
       customer,
       isOpen,
       messages,
-      connection,
+      view: {
+        connection,
+        canEscalate: messages.some((m) => m.role === "ai" || m.role === "customer"),
+        needsEmail,
+        agentTyping: connection === "agent_active" ? agentTyping : null,
+      },
     })}${renderBubble({
       isOpen,
       hideLauncher: options.behavior?.hideLauncher === true,
@@ -127,6 +163,12 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
     });
     shadow.querySelector("#supo-escalate-btn")?.addEventListener("click", () => {
       void requestEscalation();
+    });
+    shadow.querySelector("#supo-followup-btn")?.addEventListener("click", () => {
+      void submitFollowUp();
+    });
+    shadow.querySelector("#supo-followup-email")?.addEventListener("keydown", (event) => {
+      if ((event as KeyboardEvent).key === "Enter") void submitFollowUp();
     });
 
     const input = shadow.querySelector<HTMLTextAreaElement>("#supo-input");
@@ -168,21 +210,38 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   async function requestEscalation() {
     try {
       await headless.escalate();
-      messages = appendUnique(messages, { role: "system", body: "Connecting you to an agent..." });
-      connection = headless.getEscalationStatus() === "active" ? "agent_active" : "waiting_agent";
+      // The server posts the handoff notice as a system message.
+      connection = connectionFor(headless.getEscalationStatus());
       render();
     } catch (error) {
       emitError(error);
       messages = appendUnique(messages, {
         role: "system",
-        body: "Could not connect to an agent. Please try again.",
+        body: "Could not reach the support team. Please try again.",
       });
       render();
     }
   }
 
+  async function submitFollowUp() {
+    const input = shadow.querySelector<HTMLInputElement>("#supo-followup-email");
+    const email = input?.value.trim() ?? "";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      input?.classList.add("supo-error");
+      return;
+    }
+    try {
+      await headless.submitFollowUpEmail(email);
+      needsEmail = false;
+      render();
+    } catch (error) {
+      emitError(error);
+      input?.classList.add("supo-error");
+    }
+  }
+
   async function send() {
-    if (connection === "streaming" || connection === "waiting_agent") return;
+    if (connection === "streaming") return;
     const input = shadow.querySelector<HTMLTextAreaElement>("#supo-input");
     const body = input?.value.trim() ?? "";
     if (!body) return;
@@ -191,31 +250,36 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
       input.style.height = "auto";
     }
 
-    messages = [...messages, { role: "customer", body }];
-    if (connection === "agent_active") {
-      render();
-      await headless.sendMessage(body).catch(emitError);
-      return;
+    const local: SupoMessage = { role: "customer", body };
+    messages = [...messages, local];
+    const humanHandling = connection === "agent_active";
+    if (!humanHandling) {
+      messages = [...messages, { role: "typing", body: "" }];
+      connection = "streaming";
     }
-
-    messages = [...messages, { role: "typing", body: "" }];
-    connection = "streaming";
     render();
 
     try {
       const response = await headless.sendMessageWithSources(body);
-      messages[messages.length - 1] = { role: "ai", body: response.text, sources: response.sources };
-      connection = headless.getEscalationStatus() === "pending" ? "waiting_agent" : "idle";
-      render();
+      if (response.customerMessageId) {
+        messages = assignId(messages, local, response.customerMessageId);
+      }
+      messages = messages.filter((m) => m.role !== "typing");
+      if (response.replyMode === "ai" && response.text.trim()) {
+        messages = reconcileMessage(messages, {
+          id: response.aiMessageId ?? undefined,
+          role: "ai",
+          body: response.text,
+          sources: response.sources,
+        });
+      }
     } catch (error) {
       emitError(error);
-      messages[messages.length - 1] = {
-        role: "ai",
-        body: "Something went wrong. Please try again.",
-      };
-      connection = "idle";
-      render();
+      messages = messages.filter((m) => m.role !== "typing");
+      messages = [...messages, { role: "system", body: "Message not sent. Please try again." }];
     }
+    connection = connectionFor(headless.getEscalationStatus());
+    render();
   }
 
   const runtime: SupoRuntime = {
@@ -258,12 +322,14 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
       messages = [];
       connection = "idle";
       escalationStatus = null;
+      needsEmail = false;
+      clearAgentTyping();
       render();
       emitState();
     },
     destroy() {
-      unsubscribeMessage();
-      unsubscribeEscalation();
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      clearAgentTyping();
       headless.destroy();
       emitter.clear();
       host.remove();
@@ -289,6 +355,41 @@ function resolveCustomer(customer: SupoInitOptions["customer"]): SupoCustomer | 
     }
   }
   return normalizeCustomer(customer);
+}
+
+// Merges a server message into the local list: updates a known id, adopts the
+// id of a matching optimistic message (sent before the id was known), or appends.
+function reconcileMessage(messages: SupoMessage[], message: SupoMessage): SupoMessage[] {
+  if (message.id) {
+    const index = messages.findIndex((item) => item.id === message.id);
+    if (index >= 0) {
+      const next = [...messages];
+      next[index] = { ...next[index], ...message, sources: message.sources?.length ? message.sources : next[index].sources };
+      return next;
+    }
+    const pending = messages.findIndex(
+      (item) => !item.id && item.role === message.role && item.body === message.body,
+    );
+    if (pending >= 0) {
+      const next = [...messages];
+      next[pending] = { ...next[pending], ...message };
+      return next;
+    }
+  }
+  // Keep the "typing" placeholder last.
+  const typingIndex = messages.findIndex((item) => item.role === "typing");
+  if (typingIndex >= 0) {
+    return [...messages.slice(0, typingIndex), message, ...messages.slice(typingIndex)];
+  }
+  return appendUnique(messages, message);
+}
+
+function assignId(messages: SupoMessage[], local: SupoMessage, id: string): SupoMessage[] {
+  if (messages.some((item) => item.id === id)) {
+    // The server copy already arrived via realtime; drop the optimistic one.
+    return messages.filter((item) => item !== local);
+  }
+  return messages.map((item) => (item === local ? { ...item, id } : item));
 }
 
 function appendUnique(messages: SupoMessage[], message: SupoMessage): SupoMessage[] {

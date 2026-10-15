@@ -6,6 +6,7 @@ import { widgetConfig } from "@/db/schema";
 import { env } from "@/lib/env";
 import { canAccessProductCapability, getProductAccess } from "@/lib/product-access";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
+import { normalizeIdentityMode } from "@/lib/widget-identity";
 
 import { WidgetConfigurator } from "./WidgetConfigurator";
 import { WidgetSecuritySettings } from "./WidgetSecuritySettings";
@@ -40,6 +41,9 @@ export default async function WidgetPage({
       <WidgetSecuritySettings
         productId={id}
         initialAllowedOrigins={existing?.allowedOrigins ?? []}
+        initialHandoffTimeoutSec={existing?.handoffTimeoutSec ?? 300}
+        initialIdentityVerification={normalizeIdentityMode(existing?.identityVerification)}
+        hasIdentitySecret={Boolean(existing?.identitySecret)}
       />
     </div>
   );

@@ -1,3 +1,16 @@
+import type { MessageSource } from "@/db/schema";
+
+export type InboxMessage = {
+  id: string;
+  conversationId: string;
+  body: string;
+  senderType: string;
+  senderId: string | null;
+  senderName: string | null;
+  sources: MessageSource[] | null;
+  createdAt: Date;
+};
+
 export type ConversationWithDetails = {
   id: string;
   productId: string;
@@ -7,6 +20,11 @@ export type ConversationWithDetails = {
   aiHandled: boolean;
   escalationStatus: string | null;
   escalatedAt: Date | null;
+  handoffReason: string | null;
+  aiSummary: string | null;
+  followUpEmail: string | null;
+  identityVerified: boolean;
+  snoozedUntil: Date | null;
   subject: string | null;
   lastMessageAt: Date;
   createdAt: Date;

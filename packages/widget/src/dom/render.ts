@@ -34,20 +34,6 @@ export function escapeHtml(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-function lastAiOfferedEscalation(messages: SupoMessage[]): boolean {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message.role === "ai") {
-      const lower = message.body.toLowerCase();
-      return ["human agent", "connect you", "live agent", "support agent", "speak to"].some((term) =>
-        lower.includes(term),
-      );
-    }
-    if (message.role === "customer" || message.role === "agent") break;
-  }
-  return false;
-}
-
 export function renderBubble({
   isOpen,
   hideLauncher,
@@ -67,26 +53,36 @@ export function renderBubble({
   }${label}</button>`;
 }
 
+export type ChatView = {
+  connection: "idle" | "streaming" | "waiting_agent" | "agent_active";
+  // Show the "talk to a person" button.
+  canEscalate: boolean;
+  // Ask the customer for a follow-up email (no agent available).
+  needsEmail: boolean;
+  // Name of the agent currently typing, if any.
+  agentTyping: string | null;
+};
+
 export function renderPanel({
   appearance,
   poweredByUrl,
   customer,
   isOpen,
   messages,
-  connection,
+  view,
 }: {
   appearance: Required<SupoAppearance>;
   poweredByUrl: string;
   customer: SupoCustomer | null;
   isOpen: boolean;
   messages: SupoMessage[];
-  connection: "idle" | "streaming" | "waiting_agent" | "agent_active";
+  view: ChatView;
 }) {
   return `<div id="supo-panel" class="${isOpen ? "" : "supo-hidden"}">${renderHeader(
     appearance,
-    connection,
-  )}<div id="supo-beta"><strong>BETA testing:</strong> this widget is unstable at the moment.</div>${
-    customer ? renderChat(appearance, messages, connection) : renderIdForm(appearance)
+    view.connection,
+  )}${
+    customer ? renderChat(appearance, messages, view) : renderIdForm(appearance)
   }${appearance.showPoweredBy ? `<div id="supo-powered"><a href="${escapeHtml(poweredByUrl)}" target="_blank" rel="noopener">Powered by Supo</a></div>` : ""}</div>`;
 }
 
@@ -96,7 +92,7 @@ function renderHeader(
 ) {
   const subtitle =
     connection === "waiting_agent"
-      ? '<div id="supo-head-status"><span class="supo-spin"></span> Connecting to an agent...</div>'
+      ? '<div id="supo-head-status"><span class="supo-spin"></span> Waiting for a teammate…</div>'
       : connection === "agent_active"
         ? `<div id="supo-head-status">${ICON_AGENT} Agent connected</div>`
         : "";
@@ -105,11 +101,8 @@ function renderHeader(
   )}</div>${subtitle}</div><button id="supo-close" aria-label="Close">${ICON_X_SM}</button></div>`;
 }
 
-function renderChat(
-  appearance: Required<SupoAppearance>,
-  messages: SupoMessage[],
-  connection: "idle" | "streaming" | "waiting_agent" | "agent_active",
-) {
+function renderChat(appearance: Required<SupoAppearance>, messages: SupoMessage[], view: ChatView) {
+  const { connection } = view;
   const isWaiting = connection === "waiting_agent";
   const isAgentActive = connection === "agent_active";
   const isStreaming = connection === "streaming";
@@ -125,7 +118,7 @@ function renderChat(
     } else if (message.role === "ai") {
       html += `<div class="supo-msg supo-ai"><div class="supo-bub supo-ai-bub">${escapeHtml(message.body)}</div>${renderSources(message.sources)}</div>`;
     } else if (message.role === "agent") {
-      html += `<div class="supo-msg supo-agent"><div class="supo-sender-label">Support Agent</div><div class="supo-bub">${escapeHtml(message.body)}</div></div>`;
+      html += `<div class="supo-msg supo-agent"><div class="supo-sender-label">${escapeHtml(message.senderName || "Support")}</div><div class="supo-bub">${escapeHtml(message.body)}</div></div>`;
     } else if (message.role === "typing") {
       html += '<div class="supo-msg supo-ai"><div class="supo-bub"><span class="supo-dot"></span><span class="supo-dot"></span><span class="supo-dot"></span></div></div>';
     } else {
@@ -133,17 +126,24 @@ function renderChat(
     }
   }
 
+  if (view.agentTyping) {
+    html += `<div class="supo-msg supo-agent"><div class="supo-sender-label">${escapeHtml(view.agentTyping)} is typing</div><div class="supo-bub"><span class="supo-dot"></span><span class="supo-dot"></span><span class="supo-dot"></span></div></div>`;
+  }
+
   html += "</div>";
-  if (connection === "idle" && lastAiOfferedEscalation(messages)) {
+  if (view.needsEmail && isWaiting) {
+    html += `<div id="supo-followup"><input id="supo-followup-email" class="supo-inp" type="email" placeholder="you@example.com" autocomplete="email" aria-label="Email for follow-up" /><button id="supo-followup-btn">Notify me</button></div>`;
+  }
+  if (view.canEscalate && connection === "idle") {
     html += `<button id="supo-escalate-btn">${escapeHtml(appearance.agentHandoffLabel)}</button>`;
   }
 
   const placeholder = isWaiting
-    ? "Waiting for an agent..."
+    ? "Add details while you wait…"
     : isAgentActive
       ? "Reply to agent..."
       : appearance.inputPlaceholder;
-  const disabled = isStreaming || isWaiting ? " disabled" : "";
+  const disabled = isStreaming ? " disabled" : "";
   return `${html}<div id="supo-composer"><textarea id="supo-input" placeholder="${escapeHtml(
     placeholder,
   )}" rows="1"${disabled}></textarea><button id="supo-send"${disabled}>Send</button></div>`;

@@ -37,6 +37,7 @@ export function normalizeCustomer(value: unknown): SupoCustomer | null {
   const avatarUrl = text(value.avatarUrl, 2048);
   const locale = text(value.locale, 35);
   const timezone = text(value.timezone, 64);
+  const userHash = text(value.userHash, 128);
   return {
     externalId,
     name,
@@ -44,6 +45,7 @@ export function normalizeCustomer(value: unknown): SupoCustomer | null {
     avatarUrl,
     locale,
     timezone,
+    userHash,
   };
 }
 

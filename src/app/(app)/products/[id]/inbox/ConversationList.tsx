@@ -10,7 +10,15 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 
 import type { ConversationWithDetails } from "./types";
 
-type FilterTab = "all" | "open" | "resolved";
+type FilterTab = "waiting" | "mine" | "open" | "resolved" | "all";
+
+const TABS: { id: FilterTab; label: string }[] = [
+  { id: "waiting", label: "Waiting" },
+  { id: "mine", label: "Mine" },
+  { id: "open", label: "Open" },
+  { id: "resolved", label: "Resolved" },
+  { id: "all", label: "All" },
+];
 
 function relativeTime(d: Date) {
   return isToday(d) ? format(d, "h:mm a") : formatDistanceToNow(d, { addSuffix: true });
@@ -89,7 +97,7 @@ function ConversationItem({
             )}
             {conv.escalationStatus === "pending" && (
               <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-px text-[10px] text-amber-500">
-                Needs Agent
+                Waiting{conv.escalatedAt ? ` ${formatDistanceToNow(conv.escalatedAt)}` : ""}
               </span>
             )}
             {conv.escalationStatus === "active" && (
@@ -118,13 +126,17 @@ export function ConversationList({
   conversations,
   selectedId,
   onSelect,
+  currentUserId,
 }: {
   conversations: ConversationWithDetails[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  currentUserId: string;
 }) {
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<FilterTab>("all");
+  const [tab, setTab] = useState<FilterTab>(() =>
+    conversations.some((c) => c.escalationStatus === "pending" && !c.assigneeId) ? "waiting" : "open",
+  );
 
   const needsAgentCount = useMemo(
     () => conversations.filter((c) => c.escalationStatus === "pending").length,
@@ -133,7 +145,9 @@ export function ConversationList({
 
   const filtered = useMemo(() => {
     let list = conversations;
-    if (tab !== "all") list = list.filter((c) => c.status === tab);
+    if (tab === "waiting") list = list.filter((c) => c.escalationStatus === "pending" && !c.assigneeId && c.status !== "resolved");
+    else if (tab === "mine") list = list.filter((c) => c.assigneeId === currentUserId && c.status !== "resolved");
+    else if (tab !== "all") list = list.filter((c) => c.status === tab);
     if (query.trim()) {
       const q = query.toLowerCase();
       list = list.filter(
@@ -144,7 +158,7 @@ export function ConversationList({
       );
     }
     return list;
-  }, [conversations, tab, query]);
+  }, [conversations, tab, query, currentUserId]);
 
   return (
     <div className="flex w-80 shrink-0 flex-col overflow-hidden border-r border-border bg-card">
@@ -174,14 +188,14 @@ export function ConversationList({
         </div>
 
         <div className="flex overflow-hidden rounded-lg border border-border">
-          {(["all", "open", "resolved"] as const).map((t) => (
+          {TABS.map((t) => (
             <button
-              key={t}
+              key={t.id}
               type="button"
-              onClick={() => setTab(t)}
-              className={`${segmentBase} capitalize ${tab === t ? segmentActive : segmentInactive}`}
+              onClick={() => setTab(t.id)}
+              className={`${segmentBase} ${tab === t.id ? segmentActive : segmentInactive}`}
             >
-              {t}
+              {t.label}
             </button>
           ))}
         </div>
@@ -203,7 +217,11 @@ export function ConversationList({
                 <p className="text-xs text-[color:var(--text-secondary)]">
                   {tab === "all"
                     ? "No conversations yet"
-                    : `No ${tab} conversations`}
+                    : tab === "waiting"
+                      ? "Nobody is waiting for an agent"
+                      : tab === "mine"
+                        ? "No conversations assigned to you"
+                        : `No ${tab} conversations`}
                 </p>
               </>
             )}

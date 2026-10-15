@@ -76,6 +76,12 @@ export function createStorage(productId: string) {
       if (legacyKey) safeStorage("localStorage")?.setItem(legacyKey, value);
       safeStorage("sessionStorage")?.setItem(conversationKey, value);
     },
+    clearConversation(customer: SupoCustomer | null) {
+      safeStorage("localStorage")?.removeItem(customerConversationKey(customer));
+      const legacyKey = legacyEmailConversationKey(customer);
+      if (legacyKey) safeStorage("localStorage")?.removeItem(legacyKey);
+      safeStorage("sessionStorage")?.removeItem(conversationKey);
+    },
     clear() {
       const local = safeStorage("localStorage");
       const session = safeStorage("sessionStorage");

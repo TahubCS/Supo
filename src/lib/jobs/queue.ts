@@ -28,6 +28,15 @@ export function registerJobHandler(type: string, handler: JobHandler) {
   handlers.set(type, handler);
 }
 
+// Handlers live in feature modules that import this file; load the registry
+// lazily (dynamic import avoids a circular import at module load) so a job can
+// run from any route, whichever modules that route happened to import.
+let registryLoaded: Promise<unknown> | null = null;
+function ensureHandlersLoaded(): Promise<unknown> {
+  registryLoaded ??= import("./index");
+  return registryLoaded;
+}
+
 // Lock older than this is treated as a crashed/timed-out runner.
 const STALE_LOCK_MS = 10 * 60 * 1000;
 
@@ -132,6 +141,7 @@ async function executeJob(job: JobRow): Promise<"done" | "retry" | "failed"> {
 
 /** Claims and runs one specific job if it is due. */
 export async function runJobNow(jobId: string): Promise<void> {
+  await ensureHandlersLoaded();
   const job = await claimJob(jobId);
   if (job) await executeJob(job);
 }
@@ -176,6 +186,7 @@ export async function drainJobs({
   deadlineMs = 240_000,
 }: { maxJobs?: number; deadlineMs?: number } = {}) {
   const startedAt = Date.now();
+  await ensureHandlersLoaded();
   const recovered = await recoverStaleJobs();
   const results = { recovered, done: 0, retried: 0, failed: 0 };
 

@@ -37,7 +37,6 @@ export function buildStyles(cfg: Required<SupoAppearance>): string {
 #supo-head-name{font-size:13px;font-weight:600;color:#fff;flex:1}
 #supo-head-status{font-size:10px;color:rgba(255,255,255,.7);margin-top:1px}
 #supo-close{background:none;border:none;cursor:pointer;color:rgba(255,255,255,.8);padding:2px;display:flex;line-height:1}
-#supo-beta{padding:7px 14px;border-bottom:1px solid ${border};background:${isDark ? "#241f13" : "#fffbeb"};color:${isDark ? "#facc15" : "#92400e"};font-size:11px;line-height:1.4;flex-shrink:0}
 #supo-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;scroll-behavior:smooth}
 #supo-msgs::-webkit-scrollbar{width:4px}
 #supo-msgs::-webkit-scrollbar-thumb{background:${border};border-radius:2px}
@@ -48,6 +47,7 @@ export function buildStyles(cfg: Required<SupoAppearance>): string {
 .supo-ai .supo-bub{background:${messageBg};color:${text};border-bottom-left-radius:4px}
 .supo-agent .supo-bub{background:${agentBg};color:${agentText};border:1px solid ${agentBorder};border-bottom-left-radius:4px}
 .supo-system .supo-bub{background:${systemBg};color:${systemText};border:1px solid ${systemBorder};border-radius:8px;font-size:11px;text-align:center;width:100%}
+#supo-followup{display:flex;gap:6px;padding:8px 10px;border-top:1px solid ${border}}#supo-followup .supo-inp{flex:1;padding:6px 9px;font-size:12px}#supo-followup-btn{background:${accent};color:#fff;border:none;border-radius:${innerRadius};padding:0 10px;font-size:12px;cursor:pointer;font-family:inherit}
 .supo-sources{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:4px;max-width:100%}.supo-sources-label{font-size:10px;color:${muted};margin-right:2px}.supo-source{font-size:10px;line-height:1.4;padding:2px 7px;border:1px solid ${border};border-radius:999px;color:${muted};text-decoration:none;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}a.supo-source:hover{color:${text};border-color:${accent}}
 .supo-sender-label{font-size:10px;color:${muted};margin-bottom:2px}.supo-agent .supo-sender-label{color:${agentText};opacity:.8}
 .supo-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:${muted};animation:supo-blink 1.2s infinite;margin:0 1px}.supo-dot:nth-child(2){animation-delay:.2s}.supo-dot:nth-child(3){animation-delay:.4s}@keyframes supo-blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
