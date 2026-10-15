@@ -3,15 +3,14 @@ import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
 import { knowledgeSource } from "@/db/schema";
-import { env } from "@/lib/env";
+import { isAuthorizedInternalRequest } from "@/lib/internal-auth";
 import { ingestSourceIfChanged } from "@/lib/knowledge/ingest";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const apiKey = req.headers.get("x-api-key");
-  if (apiKey !== env.BETTER_AUTH_API_KEY) {
+  if (!isAuthorizedInternalRequest(req.headers)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

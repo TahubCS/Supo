@@ -120,6 +120,20 @@
       "when": 1778026560000,
       "tag": "0016_customer_identity_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1778112960000,
+      "tag": "0017_core_indexes_and_widget_origins",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778199360000,
+      "tag": "0018_repair_knowledge_schema",
+      "breakpoints": true
     }
   ]
 }

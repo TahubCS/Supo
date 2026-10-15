@@ -37,9 +37,6 @@ function formatDate(value: string): string {
   return new Date(value).toLocaleString();
 }
 
-function previewToken(token: string): string {
-  return `${token.slice(0, 8)}...${token.slice(-6)}`;
-}
 
 export function AdminUserActions({ user }: AdminUserActionsProps) {
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -120,7 +117,7 @@ export function AdminUserActions({ user }: AdminUserActionsProps) {
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <p className="font-mono text-xs text-foreground">
-                        {previewToken(session.token)}
+                        {session.tokenPreview}
                       </p>
                       <p className="mt-1 truncate text-xs text-[color:var(--text-secondary)]">
                         {session.userAgent ?? "Unknown user agent"}
@@ -134,7 +131,7 @@ export function AdminUserActions({ user }: AdminUserActionsProps) {
                       onClick={() => {
                         if (!window.confirm(`Revoke this session for ${user.email}?`)) return;
                         runAction("Session revoked", async () => {
-                          await revokeUserSession(session.token, user.id);
+                          await revokeUserSession(session.id, user.id);
                           await loadSessions();
                         });
                       }}

@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      # Placeholder values so `next build` can import server modules.
+      # No external service is contacted during the build.
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+      BETTER_AUTH_SECRET: ci-only-secret-value-for-build-0000000000
+      BETTER_AUTH_URL: http://localhost:3000
+      BETTER_AUTH_API_KEY: ci
+      GOOGLE_CLIENT_ID: ci
+      GOOGLE_CLIENT_SECRET: ci
+      GITHUB_CLIENT_ID: ci
+      GITHUB_CLIENT_SECRET: ci
+      RESEND_API_KEY: re_ci
+      GOOGLE_GEMINI_API_KEY: ci
+      SUPO_SUPER_ADMIN_EMAILS: ci@example.com
+      BETTER_AUTH_ADMIN_USER_IDS: ci
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.x
+      - run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      - name: Typecheck (app)
+        run: bun run typecheck
+      - name: Typecheck (widget SDK)
+        run: bun run typecheck:sdk
+      - name: Unit tests
+        run: bun run test
+      - name: Build
+        run: bun run build
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: supo
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/supo?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.x
+      - run: bun install --frozen-lockfile
+      - name: Apply migrations from scratch
+        run: bun run db:migrate
+      - name: Re-apply migrations (must be a no-op)
+        run: bun run db:migrate

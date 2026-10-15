@@ -4,18 +4,20 @@ import { type NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { product } from "@/db/schema";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
+import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { checkWidgetOrigin } from "@/lib/widget-origin";
 
-const CORS: HeadersInit = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+const METHODS = "GET, OPTIONS";
 
-export function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS });
+export function OPTIONS(req: NextRequest) {
+  return new Response(null, {
+    status: 204,
+    headers: widgetCorsHeaders(req.headers.get("origin"), null, METHODS),
+  });
 }
 
 export async function GET(req: NextRequest) {
+  let CORS = widgetCorsHeaders(req.headers.get("origin"), null, METHODS);
   const productId = req.nextUrl.searchParams.get("productId");
   if (!productId) {
     return NextResponse.json({ error: "productId required" }, { status: 400, headers: CORS });
@@ -28,6 +30,11 @@ export async function GET(req: NextRequest) {
   if (!found) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const originCheck = await checkWidgetOrigin(req.headers, productId, METHODS);
+  if (!originCheck.allowed) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403, headers: originCheck.cors });
+  }
+  CORS = originCheck.cors;
 
   return NextResponse.json(
     {

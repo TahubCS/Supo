@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { widgetConfig } from "@/db/schema";
 import { requireProductAccess } from "@/lib/product-access";
 import { normalizeWidgetConfig, type WidgetConfigValues } from "@/lib/widget-config";
+import { parseAllowedOrigins } from "@/lib/widget-cors";
 
 export async function saveWidgetConfig(
   productId: string,
@@ -56,4 +57,37 @@ export async function saveWidgetConfig(
         updatedAt: now,
       },
     });
+}
+
+export type SaveAllowedOriginsResult =
+  | { ok: true; origins: string[] }
+  | { ok: false; error: string };
+
+export async function saveWidgetAllowedOrigins(
+  productId: string,
+  rawOrigins: string,
+): Promise<SaveAllowedOriginsResult> {
+  await requireProductAccess(productId, ["widget"]);
+
+  const { origins, invalid } = parseAllowedOrigins(rawOrigins);
+  if (invalid.length > 0) {
+    return { ok: false, error: `Invalid origin: ${invalid.slice(0, 3).join(", ")}` };
+  }
+
+  const now = new Date();
+  await db
+    .insert(widgetConfig)
+    .values({
+      id: crypto.randomUUID(),
+      productId,
+      allowedOrigins: origins,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: widgetConfig.productId,
+      set: { allowedOrigins: origins, updatedAt: now },
+    });
+
+  return { ok: true, origins };
 }

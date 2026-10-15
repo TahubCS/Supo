@@ -8,6 +8,7 @@ import { canAccessProductCapability, getProductAccess } from "@/lib/product-acce
 import { normalizeWidgetConfig } from "@/lib/widget-config";
 
 import { WidgetConfigurator } from "./WidgetConfigurator";
+import { WidgetSecuritySettings } from "./WidgetSecuritySettings";
 
 export default async function WidgetPage({
   params,
@@ -35,6 +36,10 @@ export default async function WidgetPage({
         initialConfig={initialConfig}
         widgetUrl={`${env.BETTER_AUTH_URL}/widget.js`}
         apiBaseUrl={env.BETTER_AUTH_URL}
+      />
+      <WidgetSecuritySettings
+        productId={id}
+        initialAllowedOrigins={existing?.allowedOrigins ?? []}
       />
     </div>
   );

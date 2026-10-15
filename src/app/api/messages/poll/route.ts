@@ -10,21 +10,21 @@ import {
   safeQuotaKey,
 } from "@/lib/security";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
+import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { checkWidgetOrigin } from "@/lib/widget-origin";
 
-// Same CORS policy as /api/chat — widget runs on any customer domain.
-const CORS: HeadersInit = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+const METHODS = "GET, OPTIONS";
 
-export function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS });
+export function OPTIONS(req: NextRequest) {
+  return new Response(null, {
+    status: 204,
+    headers: widgetCorsHeaders(req.headers.get("origin"), null, METHODS),
+  });
 }
 
-function quotaErrorResponse(error: unknown) {
+function quotaErrorResponse(error: unknown, cors: Headers) {
   if (!isSecurityQuotaError(error)) return null;
-  const headers = new Headers(CORS);
+  const headers = new Headers(cors);
   headers.set("Content-Type", "application/json");
   if (error.retryAfter) {
     headers.set("Retry-After", String(error.retryAfter));
@@ -48,6 +48,7 @@ function parseSinceDate(value: string | null): Date | null {
 }
 
 export async function GET(req: NextRequest) {
+  let CORS = widgetCorsHeaders(req.headers.get("origin"), null, METHODS);
   const { searchParams } = req.nextUrl;
   const conversationId = searchParams.get("conversationId");
   const conversationToken = searchParams.get("conversationToken");
@@ -67,6 +68,11 @@ export async function GET(req: NextRequest) {
   if (!foundProduct) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
+  const originCheck = await checkWidgetOrigin(req.headers, productId, METHODS);
+  if (!originCheck.allowed) {
+    return NextResponse.json({ error: "Origin not allowed" }, { status: 403, headers: originCheck.cors });
+  }
+  CORS = originCheck.cors;
 
   const conv = await findWidgetConversation({
     conversationId,
@@ -109,7 +115,7 @@ export async function GET(req: NextRequest) {
       },
     );
   } catch (error) {
-    const response = quotaErrorResponse(error);
+    const response = quotaErrorResponse(error, CORS);
     if (response) return response;
     throw error;
   }

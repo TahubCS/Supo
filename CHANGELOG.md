@@ -2,6 +2,32 @@
 
 All notable changes to Supo will be documented in this file.
 
+## Unreleased
+
+### Security
+
+- Realtime (Ably) agent tokens are scoped to a single product: conversation channels are now `org:{org}:product:{product}:conversation:{id}` and agents get subscribe-only inbox access.
+- Optional per-product widget origin allow-list (`widget_config.allowed_origins`), enforced on chat, poll, escalation, realtime token and config endpoints.
+- Proxy rate limits and body-size caps now cover the `/api/widget/*` aliases, polling and realtime token routes.
+- Internal/cron routes use a dedicated `CRON_SECRET` (constant-time compare, Vercel Cron bearer header) instead of the Better Auth infra key. This fixes the nightly knowledge sync, which always returned 401.
+- User-controlled values are HTML-escaped in invite, verification and password-reset emails.
+- The super-admin console no longer sends raw session tokens to the browser.
+
+### Fixed
+
+- Workspace owners can no longer be downgraded by an explicit product role; workspace admins get product admin access by default, matching the dashboard.
+- Agent reply quota raised from 120 to 1200 messages per hour.
+- Local Postgres works without TLS (`DATABASE_SSL=disable` or `sslmode=disable`).
+
+### Added
+
+- Vitest unit tests, `typecheck`/`test` scripts and a GitHub Actions CI workflow (lint, typecheck, tests, build, migrations against pgvector Postgres).
+- Migration `0017` (hot-path indexes, widget allowed origins) and `0018` (idempotent knowledge-base schema repair).
+
+### Removed
+
+- Unused mock components and unused dependencies (MUI, Emotion, react-dnd, react-slick, masonry, confetti, popper).
+
 ## v0.1.0-alpha.1
 
 Initial alpha release candidate.

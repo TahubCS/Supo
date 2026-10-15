@@ -9,22 +9,24 @@ import {
   getPresenceCount,
   inboxChannelName,
   presenceChannelName,
+  productConversationsChannelPattern,
 } from "@/lib/ably";
 import { requireProductAccess } from "@/lib/product-access";
 import { findWidgetConversation } from "@/lib/widget-conversation-access";
+import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { checkWidgetOrigin } from "@/lib/widget-origin";
 
-// CORS — widget token requests are cross-origin (widget.js from any domain).
-const CORS: HeadersInit = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+const METHODS = "GET, OPTIONS";
 
-export function OPTIONS() {
-  return new Response(null, { status: 204, headers: CORS });
+export function OPTIONS(req: NextRequest) {
+  return new Response(null, {
+    status: 204,
+    headers: widgetCorsHeaders(req.headers.get("origin"), null, METHODS),
+  });
 }
 
 export async function GET(req: NextRequest) {
+  let CORS = widgetCorsHeaders(req.headers.get("origin"), null, METHODS);
   const { searchParams } = req.nextUrl;
   const productId = searchParams.get("productId");
   const conversationId = searchParams.get("conversationId");
@@ -40,6 +42,14 @@ export async function GET(req: NextRequest) {
   });
   if (!foundProduct) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
+  }
+  // Agent tokens are same-origin dashboard requests and are authorized by session below.
+  if (presenceOnly || conversationId) {
+    const originCheck = await checkWidgetOrigin(req.headers, productId, METHODS);
+    if (!originCheck.allowed) {
+      return NextResponse.json({ error: "Origin not allowed" }, { status: 403, headers: originCheck.cors });
+    }
+    CORS = originCheck.cors;
   }
 
   const orgId = foundProduct.organizationId;
@@ -67,7 +77,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
     }
 
-    const channelName = conversationChannelName(orgId, conversationId);
+    const channelName = conversationChannelName(orgId, productId, conversationId);
     const tokenRequest = await createTokenRequest(
       { [channelName]: ["subscribe"] },
       `widget:${conversationId}`,
@@ -93,11 +103,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Scoped to this product only. Inbox events are published by the server,
+  // so agents get subscribe-only access (no spoofed inbox events).
   const capability = {
-    [inboxChannelName(orgId, productId)]: ["subscribe", "publish"],
+    [inboxChannelName(orgId, productId)]: ["subscribe"],
     [presenceChannelName(orgId, productId)]: ["subscribe", "presence"],
-    // Wildcard: agent can subscribe to any conversation in their org.
-    [`org:${orgId}:conversation:*`]: ["subscribe"],
+    [productConversationsChannelPattern(orgId, productId)]: ["subscribe"],
   };
 
   const tokenRequest = await createTokenRequest(capability, `agent:${access.session.user.id}`);

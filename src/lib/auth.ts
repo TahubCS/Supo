@@ -8,6 +8,7 @@ import { Resend } from "resend";
 
 import { db } from "@/db";
 import { env } from "@/lib/env";
+import { escapeHtml } from "@/lib/html";
 
 const resend = new Resend(env.RESEND_API_KEY);
 const trustedOrigins =
@@ -80,13 +81,13 @@ export const auth = betterAuth({
     requireEmailVerification: true,
     sendResetPasswordEmail: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
       await resend.emails.send({
-        from: "Supo <onboarding@resend.dev>",
+        from: env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>",
         to: user.email,
         subject: "Reset your Supo password",
         html: `
-          <p>Hi ${user.name ?? "there"},</p>
+          <p>Hi ${escapeHtml(user.name ?? "there")},</p>
           <p>Click the link below to reset your password:</p>
-          <p><a href="${url}" style="color:#000;font-weight:600">Reset password</a></p>
+          <p><a href="${escapeHtml(url)}" style="color:#000;font-weight:600">Reset password</a></p>
           <p style="color:#737373;font-size:13px">This link expires in 1 hour. If you didn't request a password reset, you can ignore this email.</p>
         `,
       });
@@ -97,13 +98,13 @@ export const auth = betterAuth({
     sendOnSignIn: true,
     sendVerificationEmail: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
       await resend.emails.send({
-        from: "Supo <onboarding@resend.dev>",
+        from: env.SECURITY_ALERT_FROM_EMAIL ?? "Supo <onboarding@resend.dev>",
         to: user.email,
         subject: "Verify your Supo account",
         html: `
-          <p>Hi ${user.name ?? "there"},</p>
+          <p>Hi ${escapeHtml(user.name ?? "there")},</p>
           <p>Click the link below to verify your email address:</p>
-          <p><a href="${url}" style="color:#000;font-weight:600">Verify email</a></p>
+          <p><a href="${escapeHtml(url)}" style="color:#000;font-weight:600">Verify email</a></p>
           <p style="color:#737373;font-size:13px">This link expires in 24 hours. If you didn't create a Supo account, you can ignore this email.</p>
         `,
       });

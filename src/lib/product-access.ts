@@ -72,11 +72,16 @@ export async function getProductAccess(productId: string): Promise<ProductAccess
     ),
   });
   const isWorkspaceOwner = isWorkspaceOwnerRole(orgMembership.role);
-  const role = isProductRole(assigned?.role)
-    ? assigned.role
-    : isWorkspaceOwner
-      ? "admin"
-      : null;
+  // Workspace owners are always product admins (an explicit lower product role
+  // must not lock an owner out of their own product). Workspace admins default
+  // to product admin unless they were explicitly assigned a product role.
+  const role: ProductRole | null = isWorkspaceOwner
+    ? "admin"
+    : isProductRole(assigned?.role)
+      ? assigned.role
+      : orgMembership.role === "admin"
+        ? "admin"
+        : null;
 
   if (!role) return null;
 

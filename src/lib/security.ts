@@ -59,7 +59,7 @@ const quotaConfigs: Record<QuotaName, QuotaConfig> = {
   "knowledge.test.product.day": { limit: 300, window: "1 d" },
   "knowledge.source.user.day": { limit: 20, window: "1 d" },
   "knowledge.source.organization.day": { limit: 50, window: "1 d" },
-  "inbox.agent.user.hour": { limit: 120, window: "1 h" },
+  "inbox.agent.user.hour": { limit: 1200, window: "1 h" },
   "chat.escalate.conversation": { limit: 5, window: "1 h" },
   "messages.poll.conversation.minute": { limit: 60, window: "1 m" },
   "messages.poll.ip.minute": { limit: 120, window: "1 m" },

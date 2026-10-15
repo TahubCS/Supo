@@ -340,6 +340,8 @@ export const widgetConfig = pgTable("widget_config", {
   inputPlaceholder: text("input_placeholder").notNull().default("Ask a question..."),
   agentHandoffLabel: text("agent_handoff_label").notNull().default("Speak to an Agent"),
   showPoweredBy: boolean("show_powered_by").notNull().default(true),
+  // Browser origins allowed to call the public widget API. Empty = any origin.
+  allowedOrigins: text("allowed_origins").array().notNull().default(sql`'{}'::text[]`),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });

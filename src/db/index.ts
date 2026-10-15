@@ -8,12 +8,19 @@ const globalForDb = globalThis as typeof globalThis & {
   __supoPool?: Pool;
 };
 
-export const pool =
-  globalForDb.__supoPool ??
-  new Pool({
-    connectionString: env.DATABASE_URL,
-    ssl: { rejectUnauthorized: true },
-  });
+function sslConfig(connectionString: string) {
+  if (env.DATABASE_SSL === "disable" || /sslmode=disable/i.test(connectionString)) {
+    return false;
+  }
+  return { rejectUnauthorized: true };
+}
+
+function createPool() {
+  const connectionString = env.DATABASE_URL;
+  return new Pool({ connectionString, ssl: sslConfig(connectionString) });
+}
+
+export const pool = globalForDb.__supoPool ?? createPool();
 
 if (process.env.NODE_ENV !== "production") {
   globalForDb.__supoPool = pool;
