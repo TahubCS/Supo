@@ -187,4 +187,73 @@ describe.skipIf(!DATABASE_URL)("knowledge pipeline (database)", () => {
     chunks = await mod.db.query.knowledgeChunk.findMany({ where: eq(mod.schema.knowledgeChunk.sourceId, sourceId) });
     expect(chunks.some((c) => c.content.includes("sixty days"))).toBe(true);
   });
+
+  it("ignores a stale run's failure after a newer edit", async () => {
+    const { eq, sql } = await import("drizzle-orm");
+    const sourceId = await addArticle(productId, "Warranty", "Every device has a two year warranty covering manufacturing defects.");
+    hooks.duringEmbed = async () => {
+      hooks.duringEmbed = null;
+      await mod.db
+        .update(mod.schema.knowledgeSource)
+        .set({ revision: sql`${mod.schema.knowledgeSource.revision} + 1` })
+        .where(eq(mod.schema.knowledgeSource.id, sourceId));
+      throw new Error("embedding service unavailable");
+    };
+    const stale = await mod.jobs.enqueueJob("knowledge.ingest", { sourceId }, { dedupeKey: `stale-fail:${sourceId}`, maxAttempts: 1 });
+    await mod.jobs.runJobNow(stale);
+    const source = await mod.db.query.knowledgeSource.findFirst({ where: eq(mod.schema.knowledgeSource.id, sourceId) });
+    // The newer revision's state is untouched by the old run's error.
+    expect(source).toMatchObject({ status: "indexed", errorMessage: null });
+  });
+
+  it("retires a failing job when its follow-up is already queued instead of getting stuck", async () => {
+    const { eq } = await import("drizzle-orm");
+    const queue = await import("@/lib/jobs/queue");
+    const key = `test.supersede:${crypto.randomUUID()}`;
+    let followUp = "";
+    queue.registerJobHandler("test.supersede", async () => {
+      // An edit queues a follow-up while this run is still going, then the run fails.
+      followUp = await mod.jobs.enqueueJob("test.supersede", {}, { dedupeKey: key });
+      throw new Error("transient failure");
+    });
+    const first = await mod.jobs.enqueueJob("test.supersede", {}, { dedupeKey: key, maxAttempts: 3 });
+    await expect(mod.jobs.runJobNow(first)).resolves.toBeUndefined();
+
+    const original = await mod.db.query.backgroundJob.findFirst({ where: eq(mod.schema.backgroundJob.id, first) });
+    expect(original).toMatchObject({ status: "done", lastError: expect.stringContaining("Superseded") });
+    expect(followUp).not.toBe(first);
+    const next = await mod.db.query.backgroundJob.findFirst({ where: eq(mod.schema.backgroundJob.id, followUp) });
+    expect(next?.status).toBe("queued");
+    await mod.db.delete(mod.schema.backgroundJob).where(eq(mod.schema.backgroundJob.dedupeKey, key));
+  });
+
+  it("recovers stale jobs one by one when they share a dedupe key", async () => {
+    const { eq, inArray } = await import("drizzle-orm");
+    const queue = await import("@/lib/jobs/queue");
+    const key = `test.stale:${crypto.randomUUID()}`;
+    const old = new Date(Date.now() - 60 * 60 * 1000);
+    const ids = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    await mod.db.insert(mod.schema.backgroundJob).values(
+      ids.map((id, i) => ({
+        id,
+        type: "test.stale",
+        payload: {},
+        status: "running",
+        attempts: 1,
+        maxAttempts: 3,
+        runAt: old,
+        lockedAt: old,
+        dedupeKey: i < 2 ? key : null,
+        createdAt: old,
+        updatedAt: old,
+      })),
+    );
+    await expect(queue.recoverStaleJobs()).resolves.toBeGreaterThanOrEqual(2);
+    const rows = await mod.db.query.backgroundJob.findMany({ where: inArray(mod.schema.backgroundJob.id, ids) });
+    const shared = rows.filter((r) => r.dedupeKey === key).map((r) => r.status).sort();
+    expect(shared).toEqual(["done", "queued"]);
+    expect(rows.find((r) => r.id === ids[2])?.status).toBe("queued");
+    await mod.db.delete(mod.schema.backgroundJob).where(inArray(mod.schema.backgroundJob.id, ids));
+    void eq;
+  });
 });

@@ -47,17 +47,18 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
 
   const unsubscribers = [
     headless.on("message", (message) => {
-      // Public `runtime.on("message")`: each server message exactly once.
-      if (!message.id || !emittedMessageIds.has(message.id)) {
-        if (message.id) emittedMessageIds.add(message.id);
-        emitter.emit("message", message);
-      }
       messages = reconcileMessage(messages, message);
       if (message.role === "agent") {
         clearAgentTyping();
         setEscalationStatus("active");
       }
       render();
+      // Public `runtime.on("message")`: each server message exactly once. Emitted
+      // after the update so a handler that calls reset() isn't undone by it.
+      if (!message.id || !emittedMessageIds.has(message.id)) {
+        if (message.id) emittedMessageIds.add(message.id);
+        emitter.emit("message", message);
+      }
     }),
     headless.on("escalation-change", ({ status }) => {
       setEscalationStatus(status);

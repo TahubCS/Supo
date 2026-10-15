@@ -4,6 +4,17 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Review follow-ups (2)
+
+- **Job queue:**
+  - A job that fails while a follow-up with the same dedupe key is already queued is now retired instead of failing to re-queue. Before, the unique index rejected the update and the job stayed `running`.
+  - Stale-job recovery requeues one job at a time, so one conflict no longer blocks recovery of every stale job.
+- **Knowledge indexing:**
+  - A stale run's failure no longer overwrites the status of a newer edit.
+  - The nightly sync binds the documents it fetched to the revision they were fetched for.
+- **Inbox:** bulk resolve keeps selection changes made while the request was running.
+- **Widget SDK `0.1.0-alpha.10`:** message events fire after the widget has updated.
+
 ### API and webhooks
 
 - **REST API v1** (`/api/v1`): conversations (list with cursor pagination, get, update status/priority/tags), messages (list, post replies or internal notes), customers (list, upsert, update), knowledge sources (list, add, re-index, delete) and search (with optional AI answer), and help center articles (CRUD and publish). See `docs/API.md`.

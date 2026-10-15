@@ -2,6 +2,10 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.10
+
+- `runtime.on("message")` handlers now run after the widget has applied the message, so calling `runtime.reset()` from a handler is no longer undone.
+
 ## 0.1.0-alpha.9
 
 - **Suggested articles:** when the product has a published help center, the empty chat shows up to three popular articles and a link to browse the help center. The config response gained `helpCenter` (`SupoHelpCenter` type).
