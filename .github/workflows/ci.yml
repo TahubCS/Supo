@@ -69,3 +69,7 @@ jobs:
         run: bun run db:migrate
       - name: Re-apply migrations (must be a no-op)
         run: bun run db:migrate
+      - name: Database integration tests
+        run: bun run test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/supo?sslmode=disable

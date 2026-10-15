@@ -6,7 +6,21 @@ import { db } from "@/db";
 import { product } from "@/db/schema";
 import { env } from "@/lib/env";
 
-const google = createGoogleGenerativeAI({ apiKey: env.GOOGLE_GEMINI_API_KEY });
+let googleProvider: ReturnType<typeof createGoogleGenerativeAI> | null = null;
+
+// Created lazily so importing this module never requires the API key.
+export function google(modelId: string) {
+  return getGoogle()(modelId);
+}
+
+function getGoogle() {
+  googleProvider ??= createGoogleGenerativeAI({ apiKey: env.GOOGLE_GEMINI_API_KEY });
+  return googleProvider;
+}
+
+function embeddingModel(modelId: string) {
+  return getGoogle().embedding(modelId);
+}
 
 // Generation: ranked by 2026 benchmarks — best reasoning first, highest capacity last.
 // The full chain is exhausted before throwing, so the app never hard-crashes on a single model error.
@@ -62,40 +76,58 @@ export async function resolveEmbeddingModel(productId: string): Promise<string> 
     return row.embeddingModel;
   }
 
+  const errors: string[] = [];
   for (const modelId of EMBEDDING_MODELS) {
-    try {
-      await embed({
-        model: google.embedding(modelId),
-        value: "test",
-        providerOptions: { google: { outputDimensionality: EMBED_DIMENSIONS } },
-      });
-      // Conditional write — only succeeds if no model has been assigned yet,
-      // preventing concurrent requests from overwriting each other.
-      await db
-        .update(product)
-        .set({ embeddingModel: modelId })
-        .where(and(eq(product.id, productId), isNull(product.embeddingModel)));
-      embeddingModelCache.set(productId, modelId);
-      return modelId;
-    } catch {
-      // try next
+    // Two attempts per model so one transient error (429/503) doesn't
+    // permanently lock the product to a fallback model.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await embed({
+          model: embeddingModel(modelId),
+          value: "test",
+          providerOptions: { google: { outputDimensionality: EMBED_DIMENSIONS } },
+        });
+        // Conditional write — only succeeds if no model has been assigned yet.
+        await db
+          .update(product)
+          .set({ embeddingModel: modelId })
+          .where(and(eq(product.id, productId), isNull(product.embeddingModel)));
+        // Re-read: a concurrent request may have won the race with another model.
+        const locked = await db.query.product.findFirst({
+          where: eq(product.id, productId),
+          columns: { embeddingModel: true },
+        });
+        const winner = locked?.embeddingModel ?? modelId;
+        embeddingModelCache.set(productId, winner);
+        return winner;
+      } catch (err) {
+        errors.push(`${modelId}: ${err instanceof Error ? err.message : String(err)}`);
+        if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 750));
+      }
     }
   }
-  throw new Error("No embedding models available for product " + productId);
+  throw new Error(`No embedding models available for product ${productId}:\n${errors.join("\n")}`);
 }
 
 // Used for query-time embeddings (semantic search). taskType RETRIEVAL_QUERY
 // optimizes the vector for matching against indexed document chunks.
 export async function geminiEmbed(text: string, productId: string): Promise<number[]> {
+  return (await geminiEmbedQuery(text, productId)).embedding;
+}
+
+export async function geminiEmbedQuery(
+  text: string,
+  productId: string,
+): Promise<{ embedding: number[]; model: string }> {
   const modelId = await resolveEmbeddingModel(productId);
   const { embedding } = await embed({
-    model: google.embedding(modelId),
+    model: embeddingModel(modelId),
     value: text,
     providerOptions: {
       google: { outputDimensionality: EMBED_DIMENSIONS, taskType: "RETRIEVAL_QUERY" },
     },
   });
-  return embedding;
+  return { embedding, model: modelId };
 }
 
 const EMBED_BATCH_SIZE = 100;
@@ -103,8 +135,15 @@ const EMBED_BATCH_SIZE = 100;
 // Used for ingestion-time embeddings (document chunks). taskType RETRIEVAL_DOCUMENT
 // optimizes the vector for being retrieved by a query.
 export async function geminiEmbedMany(texts: string[], productId: string): Promise<number[][]> {
+  return (await geminiEmbedManyWithModel(texts, productId)).embeddings;
+}
+
+export async function geminiEmbedManyWithModel(
+  texts: string[],
+  productId: string,
+): Promise<{ embeddings: number[][]; model: string }> {
   const modelId = await resolveEmbeddingModel(productId);
-  const model = google.embedding(modelId);
+  const model = embeddingModel(modelId);
   const result: number[][] = [];
 
   for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
@@ -118,7 +157,7 @@ export async function geminiEmbedMany(texts: string[], productId: string): Promi
     result.push(...embeddings);
   }
 
-  return result;
+  return { embeddings: result, model: modelId };
 }
 
 // Probes the generation model chain once and caches the first working model for

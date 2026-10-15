@@ -27,6 +27,7 @@ export type Suggestion = {
   status: string;
   kind: string;
   confidence: number;
+  hits: number;
   question: string;
   answer: string | null;
   content: string | null;
@@ -44,6 +45,22 @@ export type Suggestion = {
     customer: { id: string; name: string; email: string | null } | null;
   } | null;
 };
+
+// Gaps have no AI confidence; how often customers asked is the useful signal.
+function SuggestionBadge({ suggestion }: { suggestion: Pick<Suggestion, "kind" | "confidence" | "hits"> }) {
+  if (suggestion.kind === "gap") {
+    const tone =
+      suggestion.hits >= 5
+        ? "bg-[color:var(--status-warning)]/15 text-[color:var(--status-warning)]"
+        : "border border-border text-[color:var(--text-secondary)]";
+    return (
+      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${tone}`}>
+        Asked {suggestion.hits}×
+      </span>
+    );
+  }
+  return <ConfidenceBadge value={suggestion.confidence} />;
+}
 
 function ConfidenceBadge({ value }: { value: number }) {
   const tone =
@@ -134,7 +151,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
             </p>
           ) : null}
         </div>
-        <ConfidenceBadge value={suggestion.confidence} />
+        <SuggestionBadge suggestion={suggestion} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-tertiary)]">
@@ -177,7 +194,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
 
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-2">
-                <ConfidenceBadge value={suggestion.confidence} />
+                <SuggestionBadge suggestion={suggestion} />
                 <Badge
                   variant="outline"
                   className="h-5 rounded-full px-2 text-[10px] font-normal text-[color:var(--text-secondary)]"

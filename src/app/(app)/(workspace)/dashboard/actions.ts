@@ -6,7 +6,7 @@ import { headers } from "next/headers";
 import { db } from "@/db";
 import { knowledgeSource, member, product, productMember } from "@/db/schema";
 import { auth } from "@/lib/auth";
-import { env } from "@/lib/env";
+import { queueSourceIndexing } from "@/lib/jobs";
 import { isWorkspaceOwnerRole } from "@/lib/product-access";
 
 export interface CreateProductValues {
@@ -53,25 +53,23 @@ export async function createProduct(
     updatedAt: now,
   });
 
-  // Auto-bootstrap: if a URL is provided, create a sitemap source and kick off crawl immediately
+  // Auto-bootstrap: if a URL is provided, crawl the website into the knowledge base.
   if (values.url?.trim()) {
     const sourceId = crypto.randomUUID();
     await db.insert(knowledgeSource).values({
       id: sourceId,
       productId: id,
-      type: "sitemap",
+      type: "website",
       name: "Website (auto-discovered)",
       url: values.url.trim(),
+      settings: { maxPages: 50 },
       status: "indexing",
+      indexingStartedAt: now,
       chunkCount: 0,
       createdAt: now,
       updatedAt: now,
     });
-    fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.CRON_SECRET ?? ""}` },
-      body: JSON.stringify({ sourceId, productId: id }),
-    }).catch(() => {});
+    await queueSourceIndexing(sourceId);
   }
 
   return { id };

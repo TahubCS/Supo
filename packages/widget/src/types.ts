@@ -65,11 +65,23 @@ export type SupoWidgetConfigResponse = {
   };
 };
 
+export type SupoSource = {
+  title: string;
+  url: string | null;
+};
+
 export type SupoMessage = {
   id?: string;
   role: "customer" | "ai" | "agent" | "system" | "typing";
   body: string;
   createdAt?: string;
+  // Knowledge base articles an AI answer was based on.
+  sources?: SupoSource[];
+};
+
+export type SupoSendResult = {
+  text: string;
+  sources: SupoSource[];
 };
 
 export type SupoState = {

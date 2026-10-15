@@ -1,6 +1,25 @@
 import { relations, sql } from "drizzle-orm";
-import { boolean, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  customType,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { vector } from "drizzle-orm/pg-core";
+
+const tsvector = customType<{ data: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
+export type MessageSource = { title: string; url: string | null };
 
 export const productRoleEnum = pgEnum("product_role", ["admin", "developer", "agent"]);
 export const productInvitationStatusEnum = pgEnum("product_invitation_status", [
@@ -434,6 +453,8 @@ export const message = pgTable("message", {
   body: text("body").notNull(),
   senderType: text("sender_type").notNull(),
   senderId: text("sender_id").references(() => user.id, { onDelete: "set null" }),
+  // Knowledge citations attached to AI answers.
+  sources: jsonb("sources").$type<MessageSource[]>(),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -462,9 +483,17 @@ export const knowledgeSource = pgTable("knowledge_source", {
   chunkCount: integer("chunk_count").notNull().default(0),
   contentHash: text("content_hash"),     // SHA-256 of last fetched content; set after each index
   lastCheckedAt: timestamp("last_checked_at"), // last time content was fetched and compared
+  // Disabled sources stay indexed but are excluded from retrieval.
+  enabled: boolean("enabled").notNull().default(true),
+  indexingStartedAt: timestamp("indexing_started_at"),
+  pageCount: integer("page_count").notNull().default(0),
+  // Crawl settings for website sources, e.g. { maxPages: 50 }.
+  settings: jsonb("settings").$type<KnowledgeSourceSettings>(),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 });
+
+export type KnowledgeSourceSettings = { maxPages?: number };
 
 export const knowledgeSourceRelations = relations(knowledgeSource, ({ one, many }) => ({
   product: one(product, {
@@ -491,6 +520,8 @@ export const knowledgeSuggestion = pgTable(
     status: text("status").notNull().default("pending"), // "pending" | "approved" | "rejected"
     kind: text("kind").notNull().default("faq"), // "faq" | "gap"
     confidence: integer("confidence").notNull().default(0),
+    // How many times customers asked this (gap suggestions are de-duplicated).
+    hits: integer("hits").notNull().default(1),
     question: text("question").notNull(),
     answer: text("answer"),
     content: text("content"),
@@ -535,7 +566,10 @@ export const knowledgeChunk = pgTable("knowledge_chunk", {
     .references(() => product.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
   embedding: vector("embedding", { dimensions: 768 }),
-  metadata: text("metadata"), // JSON: { title, url, chunkIndex }
+  embeddingModel: text("embedding_model"),
+  metadata: text("metadata"), // JSON: { title, url, headingPath, chunkIndex }
+  // Keyword search vector maintained by Postgres (hybrid retrieval).
+  contentTsv: tsvector("content_tsv").generatedAlwaysAs(sql`to_tsvector('english', content)`),
   createdAt: timestamp("created_at").notNull(),
 });
 
@@ -549,3 +583,29 @@ export const knowledgeChunkRelations = relations(knowledgeChunk, ({ one }) => ({
     references: [product.id],
   }),
 }));
+
+// Durable background work (knowledge indexing, notifications, webhooks).
+// Jobs are claimed with FOR UPDATE SKIP LOCKED; see src/lib/jobs/queue.ts.
+export const backgroundJob = pgTable(
+  "background_job",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: text("status").notNull().default("queued"), // queued | running | done | failed
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
+    runAt: timestamp("run_at").notNull(),
+    lockedAt: timestamp("locked_at"),
+    lastError: text("last_error"),
+    dedupeKey: text("dedupe_key"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [
+    index("background_job_status_run_at_idx").on(table.status, table.runAt),
+    uniqueIndex("background_job_active_dedupe_idx")
+      .on(table.dedupeKey)
+      .where(sql`${table.dedupeKey} IS NOT NULL AND ${table.status} IN ('queued', 'running')`),
+  ],
+);

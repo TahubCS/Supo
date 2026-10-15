@@ -4,6 +4,8 @@ import type {
   SupoEventHandler,
   SupoEventName,
   SupoInitOptions,
+  SupoSendResult,
+  SupoSource,
 } from "./types";
 import { joinUrl, resolveApiBaseUrl } from "./runtime/config";
 import { createEmitter } from "./runtime/events";
@@ -65,6 +67,7 @@ export function createSupoClient(options: HeadlessClientOptions) {
         role: message.senderType === "customer" ? "customer" : message.senderType,
         body: message.body,
         createdAt: message.createdAt,
+        sources: message.sources,
       });
     }
     return data;
@@ -136,7 +139,30 @@ export function createSupoClient(options: HeadlessClientOptions) {
     }
   }
 
+  function parseSources(header: string | null): SupoSource[] {
+    if (!header) return [];
+    try {
+      const binary = atob(header);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .filter((item): item is { title: unknown; url: unknown } => typeof item === "object" && item !== null)
+        .map((item) => ({
+          title: typeof item.title === "string" ? item.title : "Source",
+          url: typeof item.url === "string" && /^https?:\/\//i.test(item.url) ? item.url : null,
+        }))
+        .slice(0, 5);
+    } catch {
+      return [];
+    }
+  }
+
   async function sendMessage(body: string): Promise<string> {
+    return (await sendMessageWithSources(body)).text;
+  }
+
+  async function sendMessageWithSources(body: string): Promise<SupoSendResult> {
     if (!customer) throw new Error("Supo customer is required before sending messages.");
     const trimmed = body.trim();
     if (!trimmed) throw new Error("Message cannot be empty.");
@@ -159,14 +185,15 @@ export function createSupoClient(options: HeadlessClientOptions) {
       storage.setConversation(customer, nextConversationId, nextConversationToken);
       void subscribeToConversation(nextConversationId, nextConversationToken);
     }
+    const sources = parseSources(response.headers.get("x-sources"));
     const headerStatus = response.headers.get("x-escalation-status");
     if (headerStatus === "pending" || headerStatus === "active") {
       setEscalationStatus(headerStatus);
-      return response.text();
+      return { text: await response.text(), sources: [] };
     }
 
     const reader = response.body?.getReader();
-    if (!reader) return response.text();
+    if (!reader) return { text: await response.text(), sources };
     const decoder = new TextDecoder();
     let text = "";
     while (true) {
@@ -175,7 +202,7 @@ export function createSupoClient(options: HeadlessClientOptions) {
       text += decoder.decode(result.value, { stream: true });
     }
     void pollOnce().catch(() => {});
-    return text;
+    return { text, sources };
   }
 
   async function escalate() {
@@ -221,6 +248,7 @@ export function createSupoClient(options: HeadlessClientOptions) {
 
   return {
     sendMessage,
+    sendMessageWithSources,
     escalate,
     identify,
     reset,
@@ -259,6 +287,8 @@ export type {
   SupoEventName,
   SupoInitOptions,
   SupoMessage,
+  SupoSendResult,
+  SupoSource,
   SupoRuntime,
   SupoState,
 } from "./types";

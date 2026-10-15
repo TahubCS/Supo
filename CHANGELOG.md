@@ -4,6 +4,21 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Knowledge base (fixed and rebuilt)
+
+- **Indexing actually runs:** sources were indexed by an un-awaited `fetch` from server actions, which Vercel often froze, leaving sources stuck in "Indexing…" forever. Indexing now runs on a Postgres job queue with `after()`, retries and cron recovery. Stuck sources are re-queued.
+- **Web pages are chunked properly:** HTML used to be flattened into one line, so every page became a single chunk of up to 100k characters that could not be embedded or retrieved. Pages are now converted to structured text and split into passages of at most 1,200 characters by heading, paragraph and sentence.
+- **Retrieval works for every tenant:** the global HNSW index filtered by product after the scan, so smaller products got no results. Retrieval is now scoped per product, hybrid (vector + full-text with Reciprocal Rank Fusion) and shared by the widget, the test panel and the API.
+- Website crawling: `robots.txt` and sitemap index support, relative link crawling, www/apex handling, path scoping and a configurable page budget (up to 200 pages).
+- SSRF protection, timeouts and size limits for all fetched URLs.
+- Citations: AI answers are stored with their sources and shown in the widget as source links.
+- The knowledge UI shows live indexing status, visible errors and partial crawl failures. It adds per-source enable/disable, editing, a "view content" passage viewer and a Website source type.
+- The test panel uses the production prompt and shows the retrieved passages with their scores; it no longer creates gap suggestions.
+- Gap suggestions ignore greetings and small talk and merge similar questions with an "asked N×" counter.
+- Small talk and retrieval outages no longer escalate the conversation to a human.
+- The embedding-model lock re-reads the database after the race, and a single transient error no longer pins a product to the fallback model.
+- Migration `0019_knowledge_pipeline`.
+
 ### Security
 
 - Realtime (Ably) agent tokens are scoped to a single product: conversation channels are now `org:{org}:product:{product}:conversation:{id}` and agents get subscribe-only inbox access.

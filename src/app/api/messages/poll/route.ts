@@ -134,6 +134,7 @@ export async function GET(req: NextRequest) {
         id: m.id,
         body: m.body,
         senderType: m.senderType,
+        sources: m.sources ?? undefined,
         createdAt: m.createdAt.toISOString(),
       })),
       escalationStatus: conv.escalationStatus,
