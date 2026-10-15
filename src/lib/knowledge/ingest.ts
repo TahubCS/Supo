@@ -2,39 +2,29 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { knowledgeChunk, knowledgeSource } from "@/db/schema";
+import { safeFetch } from "@/lib/net/safe-fetch";
 
-import { geminiEmbedMany } from "./ai";
+import { geminiEmbedManyWithModel } from "./ai";
+import { buildEmbeddingText, chunkDocument } from "./chunk";
+import { crawlSite } from "./crawl";
+import { extractDocument } from "./extract";
 
 type KnowledgeChunkInsert = typeof knowledgeChunk.$inferInsert;
+type KnowledgeSourceRow = typeof knowledgeSource.$inferSelect;
 
-// ---------------------------------------------------------------------------
-// Text chunking
-// ---------------------------------------------------------------------------
+export type IndexDocument = { title: string | null; url: string | null; text: string };
 
-export function chunkText(text: string): string[] {
-  const TARGET = 800;
-  const OVERLAP = 200;
+type LoadedDocuments = {
+  docs: IndexDocument[];
+  failedPages: number;
+  totalPages: number;
+};
 
-  const paragraphs = text
-    .replace(/\r\n/g, "\n")
-    .split(/\n{2,}/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const para of paragraphs) {
-    if (current.length + para.length + 1 > TARGET && current.length > 0) {
-      chunks.push(current.trim());
-      current = current.slice(-OVERLAP) + "\n\n" + para;
-    } else {
-      current = current ? current + "\n\n" + para : para;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  return chunks.filter((c) => c.length > 20);
-}
+export const DEFAULT_MAX_PAGES = 50;
+export const MAX_PAGES_LIMIT = 200;
+const MAX_CHUNKS_PER_SOURCE = 4000;
+// Sources stuck in "indexing" longer than this are re-queued by the cron.
+export const STUCK_INDEXING_MS = 15 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Content hash — SHA-256, hex-encoded (built-in Web Crypto, no extra deps)
@@ -47,350 +37,268 @@ export async function computeHash(text: string): Promise<string> {
     .join("");
 }
 
-// ---------------------------------------------------------------------------
-// Text extraction helpers
-// ---------------------------------------------------------------------------
-
-export async function fetchUrl(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { "User-Agent": "Supo-Bot/1.0" } });
-  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
-  const html = await res.text();
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 100_000);
+export async function hashDocuments(docs: IndexDocument[]): Promise<string> {
+  const canonical = [...docs]
+    .sort((a, b) => (a.url ?? "").localeCompare(b.url ?? ""))
+    .map((d) => `${d.url ?? ""}\n${d.title ?? ""}\n${d.text}`)
+    .join("\n\u0000\n");
+  return computeHash(canonical);
 }
 
-type GitHubFile = { name: string; content: string };
+// ---------------------------------------------------------------------------
+// Loading source content
+// ---------------------------------------------------------------------------
 
-export async function fetchGitHub(repoUrl: string): Promise<GitHubFile[]> {
-  const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+)/);
+export async function fetchPageDocument(url: string): Promise<IndexDocument> {
+  const response = await safeFetch(url, {
+    allowedContentTypes: ["text/html", "application/xhtml+xml", "text/plain", "text/markdown"],
+  });
+  const doc = extractDocument(response.text(), response.contentType, response.url);
+  if (!doc.text.trim()) throw new Error("The page has no readable text (it may require JavaScript)");
+  return { title: doc.title, url: response.url, text: doc.text };
+}
+
+const GITHUB_DOC_EXTENSIONS = /\.(md|mdx|markdown|rst|txt)$/i;
+const GITHUB_DOC_DIRS = ["docs", "doc", "documentation", "guides", "website/docs"];
+const GITHUB_MAX_FILES = 60;
+
+export async function fetchGitHubDocuments(repoUrl: string): Promise<IndexDocument[]> {
+  const match = repoUrl.match(/github\.com\/([^/\s]+)\/([^/\s#?]+)/);
   if (!match) throw new Error("Invalid GitHub URL — expected https://github.com/owner/repo");
-  const [, owner, repo] = match;
+  const owner = match[1];
+  const repo = match[2].replace(/\.git$/, "");
   const base = `https://api.github.com/repos/${owner}/${repo}`;
-  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+  const docs: IndexDocument[] = [];
 
-  const files: GitHubFile[] = [];
-
-  try {
-    const r = await fetch(`${base}/readme`, { headers });
-    if (r.ok) {
-      const data = (await r.json()) as { content: string; name: string };
-      files.push({ name: data.name, content: Buffer.from(data.content, "base64").toString("utf8") });
-    }
-  } catch {
-    // no readme
-  }
-
-  async function fetchDir(path: string, depth = 0) {
-    if (files.length >= 20 || depth > 3) return;
+  async function getJson<T>(url: string): Promise<T | null> {
     try {
-      const r = await fetch(`${base}/contents/${path}`, { headers });
-      if (!r.ok) return;
-      const items = (await r.json()) as Array<{
-        type: string;
-        name: string;
-        path: string;
-        download_url: string | null;
-      }>;
-      for (const item of items) {
-        if (files.length >= 20) break;
-        if (item.type === "dir") {
-          await fetchDir(item.path, depth + 1);
-        } else if (item.type === "file" && item.name.endsWith(".md") && item.download_url) {
-          const fr = await fetch(item.download_url);
-          if (fr.ok) files.push({ name: item.path, content: await fr.text() });
-        }
-      }
+      const response = await safeFetch(url, { accept: "application/vnd.github+json", timeoutMs: 10_000 });
+      return JSON.parse(response.text()) as T;
     } catch {
-      // ignore fetch errors for individual dirs
+      return null;
     }
   }
 
-  await fetchDir("docs");
-  return files;
-}
-
-// ---------------------------------------------------------------------------
-// Sitemap-driven URL discovery (for "sitemap" source type)
-// ---------------------------------------------------------------------------
-
-export async function discoverSitemapUrls(rootUrl: string): Promise<string[]> {
-  let root: URL;
-  try {
-    root = new URL(rootUrl);
-  } catch {
-    return [rootUrl];
+  const readme = await getJson<{ content: string; name: string; html_url: string }>(`${base}/readme`);
+  if (readme?.content) {
+    docs.push({
+      title: `${repo} — ${readme.name}`,
+      url: readme.html_url,
+      text: Buffer.from(readme.content, "base64").toString("utf8"),
+    });
   }
 
-  const seen = new Set<string>();
-  seen.add(rootUrl);
+  type Item = { type: string; name: string; path: string; download_url: string | null; html_url: string };
 
-  // 1. Try sitemap.xml
-  try {
-    const sitemapUrl = `${root.origin}/sitemap.xml`;
-    const res = await fetch(sitemapUrl, {
-      headers: { "User-Agent": "Supo-Bot/1.0" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (res.ok) {
-      const xml = await res.text();
-      const locs = [...xml.matchAll(/<loc>\s*(https?:\/\/[^<\s]+)\s*<\/loc>/gi)]
-        .map((m) => m[1].trim())
-        .filter((u) => {
-          try {
-            return new URL(u).hostname === root.hostname;
-          } catch {
-            return false;
-          }
-        });
-      for (const u of locs) {
-        seen.add(u);
-        if (seen.size >= 30) break;
-      }
-      // If sitemap gave us additional URLs, trust it
-      if (seen.size > 1) return [...seen].slice(0, 30);
-    }
-  } catch {
-    // sitemap not available — fall through
-  }
-
-  // 2. Fallback: extract same-domain <a href> links from root page
-  try {
-    const res = await fetch(rootUrl, {
-      headers: { "User-Agent": "Supo-Bot/1.0" },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (res.ok) {
-      const html = await res.text();
-      const hrefs = [...html.matchAll(/href=["'](https?:\/\/[^"']+)["']/gi)].map((m) => m[1]);
-      for (const href of hrefs) {
+  async function walk(path: string, depth: number) {
+    if (docs.length >= GITHUB_MAX_FILES || depth > 4) return;
+    const items = await getJson<Item[]>(`${base}/contents/${path}`);
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      if (docs.length >= GITHUB_MAX_FILES) break;
+      if (item.type === "dir") {
+        await walk(item.path, depth + 1);
+      } else if (item.type === "file" && GITHUB_DOC_EXTENSIONS.test(item.name) && item.download_url) {
         try {
-          const u = new URL(href);
-          if (u.hostname !== root.hostname) continue;
-          // Deduplicate by stripping query strings
-          u.search = "";
-          u.hash = "";
-          seen.add(u.toString());
+          const file = await safeFetch(item.download_url, { timeoutMs: 10_000, maxBytes: 1024 * 1024 });
+          docs.push({ title: item.path, url: item.html_url, text: file.text() });
         } catch {
-          // invalid URL
+          // skip unreadable files
         }
-        if (seen.size >= 30) break;
       }
     }
-  } catch {
-    // root page unavailable — return what we have
   }
 
-  return [...seen].slice(0, 30);
+  for (const dir of GITHUB_DOC_DIRS) await walk(dir, 0);
+  if (docs.length === 0) throw new Error("No README or markdown docs found in the repository");
+  return docs;
+}
+
+export async function loadSourceDocuments(source: KnowledgeSourceRow): Promise<LoadedDocuments> {
+  switch (source.type) {
+    case "article":
+    case "conversation": {
+      if (!source.content?.trim()) throw new Error("No content to index");
+      return { docs: [{ title: source.name, url: source.url, text: source.content }], failedPages: 0, totalPages: 1 };
+    }
+    case "url": {
+      if (!source.url) throw new Error("No URL to fetch");
+      return { docs: [await fetchPageDocument(source.url)], failedPages: 0, totalPages: 1 };
+    }
+    case "github": {
+      if (!source.url) throw new Error("No repository URL");
+      const docs = await fetchGitHubDocuments(source.url);
+      return { docs, failedPages: 0, totalPages: docs.length };
+    }
+    case "sitemap":
+    case "website": {
+      if (!source.url) throw new Error("No website URL");
+      const maxPages = Math.min(source.settings?.maxPages ?? DEFAULT_MAX_PAGES, MAX_PAGES_LIMIT);
+      const result = await crawlSite(source.url, { maxPages });
+      if (result.pages.length === 0) {
+        const reason = result.failed[0]?.error;
+        throw new Error(reason ? `No pages could be fetched (${reason})` : "No pages found on this website");
+      }
+      return {
+        docs: result.pages.map((page) => ({ title: page.title, url: page.url, text: page.text })),
+        failedPages: result.failed.length,
+        totalPages: result.pages.length + result.failed.length,
+      };
+    }
+    default:
+      throw new Error(`Unsupported source type: ${source.type}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Core ingestion — pure: chunk → embed → insert. Caller owns status updates.
+// Chunk + embed
 // ---------------------------------------------------------------------------
 
-export async function ingestText(
-  text: string,
-  sourceId: string,
-  productId: string,
-  metadata: Record<string, unknown>,
-): Promise<number> {
-  const rows = await buildChunkRows(text, sourceId, productId, metadata);
-  await insertChunkRows(rows);
-  return rows.length;
-}
-
-async function buildChunkRows(
-  text: string,
-  sourceId: string,
-  productId: string,
-  metadata: Record<string, unknown>,
+export async function buildChunkRows(
+  docs: IndexDocument[],
+  source: Pick<KnowledgeSourceRow, "id" | "productId" | "name">,
 ): Promise<KnowledgeChunkInsert[]> {
-  const chunks = chunkText(text);
-  if (chunks.length === 0) return [];
+  const prepared: { content: string; embedText: string; metadata: Record<string, unknown> }[] = [];
 
-  const embeddings = await geminiEmbedMany(chunks, productId);
+  for (const doc of docs) {
+    const title = doc.title?.trim() || source.name;
+    for (const chunk of chunkDocument(doc.text)) {
+      prepared.push({
+        content: chunk.content,
+        embedText: buildEmbeddingText(chunk, title),
+        metadata: { title, url: doc.url, headingPath: chunk.headingPath, chunkIndex: chunk.index },
+      });
+      if (prepared.length >= MAX_CHUNKS_PER_SOURCE) break;
+    }
+    if (prepared.length >= MAX_CHUNKS_PER_SOURCE) break;
+  }
 
-  return chunks.map((content, i) => ({
+  if (prepared.length === 0) return [];
+
+  const { embeddings, model } = await geminiEmbedManyWithModel(
+    prepared.map((p) => p.embedText),
+    source.productId,
+  );
+  const now = new Date();
+
+  return prepared.map((p, i) => ({
     id: crypto.randomUUID(),
-    sourceId,
-    productId,
-    content,
+    sourceId: source.id,
+    productId: source.productId,
+    content: p.content,
     embedding: embeddings[i],
-    metadata: JSON.stringify({ ...metadata, chunkIndex: i }),
-    createdAt: new Date(),
+    embeddingModel: model,
+    metadata: JSON.stringify(p.metadata),
+    createdAt: now,
   }));
 }
 
-async function insertChunkRows(rows: KnowledgeChunkInsert[]): Promise<void> {
-  for (let i = 0; i < rows.length; i += 50) {
-    await db.insert(knowledgeChunk).values(rows.slice(i, i + 50));
-  }
-}
-
 // ---------------------------------------------------------------------------
-// ingestSource — full re-index. Owns all status transitions + hash storage.
+// ingestSource — full re-index with an atomic swap of chunks.
 // ---------------------------------------------------------------------------
 
-export async function ingestSource(sourceId: string, productId: string): Promise<void> {
-  const source = await db.query.knowledgeSource.findFirst({
-    where: eq(knowledgeSource.id, sourceId),
-  });
-  if (!source) throw new Error("Source not found: " + sourceId);
+export type IngestOptions = {
+  // When false, failures are recorded as "retrying"; on the final attempt the
+  // source is marked as failed. Errors are rethrown either way.
+  isFinalAttempt?: boolean;
+  preloaded?: LoadedDocuments;
+};
 
-  if (source.status !== "indexed") {
+export async function ingestSource(sourceId: string, options: IngestOptions = {}): Promise<void> {
+  const source = await db.query.knowledgeSource.findFirst({ where: eq(knowledgeSource.id, sourceId) });
+  if (!source) return; // deleted while queued — nothing to do
+
+  const isFinalAttempt = options.isFinalAttempt ?? true;
+  const wasIndexed = source.status === "indexed" && source.chunkCount > 0;
+
+  if (!wasIndexed) {
     await db
       .update(knowledgeSource)
-      .set({ status: "indexing", errorMessage: null, updatedAt: new Date() })
+      .set({ status: "indexing", indexingStartedAt: new Date(), updatedAt: new Date() })
       .where(eq(knowledgeSource.id, sourceId));
   }
 
   try {
-    let allContent = "";
-    const rows: KnowledgeChunkInsert[] = [];
+    const loaded = options.preloaded ?? (await loadSourceDocuments(source));
+    const rows = await buildChunkRows(loaded.docs, source);
+    if (rows.length === 0) throw new Error("No indexable text found");
 
-    if (source.type === "article" || source.type === "conversation") {
-      if (!source.content) throw new Error("No content to index");
-      allContent = source.content;
-      rows.push(...await buildChunkRows(source.content, sourceId, productId, { title: source.name }));
-    } else if (source.type === "url") {
-      if (!source.url) throw new Error("No URL to fetch");
-      allContent = await fetchUrl(source.url);
-      rows.push(...await buildChunkRows(allContent, sourceId, productId, {
-        title: source.name,
-        url: source.url,
-      }));
-    } else if (source.type === "github") {
-      if (!source.url) throw new Error("No repo URL");
-      const files = await fetchGitHub(source.url);
-      if (files.length === 0) throw new Error("No markdown files found in repo");
-      allContent = files.map((f) => f.content).join("\n\n");
-      for (const file of files) {
-        rows.push(...await buildChunkRows(file.content, sourceId, productId, {
-          title: file.name,
-          url: source.url,
-        }));
-      }
-    } else if (source.type === "sitemap") {
-      if (!source.url) throw new Error("No URL");
-      const urls = await discoverSitemapUrls(source.url);
-      const pageContents: string[] = [];
-      for (const url of urls) {
-        try {
-          const text = await fetchUrl(url);
-          pageContents.push(text);
-          const title = url.split("/").filter(Boolean).pop() ?? url;
-          rows.push(...await buildChunkRows(text, sourceId, productId, { title, url }));
-        } catch {
-          // skip failed pages, continue with rest
-        }
-      }
-      allContent = pageContents.join("\n\n");
-    }
-
-    if (rows.length === 0) {
-      throw new Error("No indexable content found");
-    }
-
+    const contentHash = await hashDocuments(loaded.docs);
     const now = new Date();
-    const contentHash = await computeHash(allContent);
+    const warning =
+      loaded.failedPages > 0 ? `${loaded.failedPages} of ${loaded.totalPages} pages could not be fetched` : null;
 
     await db.transaction(async (tx) => {
+      // Source may have been deleted mid-run; the FK would reject the insert.
+      const stillExists = await tx.query.knowledgeSource.findFirst({
+        where: eq(knowledgeSource.id, sourceId),
+        columns: { id: true },
+      });
+      if (!stillExists) return;
+
       await tx.delete(knowledgeChunk).where(eq(knowledgeChunk.sourceId, sourceId));
-      for (let i = 0; i < rows.length; i += 50) {
-        await tx.insert(knowledgeChunk).values(rows.slice(i, i + 50));
+      for (let i = 0; i < rows.length; i += 100) {
+        await tx.insert(knowledgeChunk).values(rows.slice(i, i + 100));
       }
       await tx
         .update(knowledgeSource)
         .set({
           status: "indexed",
           chunkCount: rows.length,
+          pageCount: loaded.docs.length,
           contentHash,
           lastCheckedAt: now,
-          errorMessage: null,
+          indexingStartedAt: null,
+          errorMessage: warning,
           updatedAt: now,
         })
         .where(eq(knowledgeSource.id, sourceId));
     });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     await db
       .update(knowledgeSource)
-      .set({
-        status: source.status === "indexed" ? "indexed" : "error",
-        errorMessage: err instanceof Error ? err.message : String(err),
-        updatedAt: new Date(),
-      })
+      .set(
+        isFinalAttempt
+          ? {
+              // Keep serving the previous index if there is one.
+              status: wasIndexed ? "indexed" : "error",
+              indexingStartedAt: null,
+              errorMessage: wasIndexed ? `Last refresh failed: ${message}` : message,
+              updatedAt: new Date(),
+            }
+          : { errorMessage: `Retrying after error: ${message}`, updatedAt: new Date() },
+      )
       .where(eq(knowledgeSource.id, sourceId));
+    // Always surface the failure so the job is retried or recorded as failed.
+    throw err;
   }
 }
 
 // ---------------------------------------------------------------------------
-// ingestSourceIfChanged — used by cron. Skips re-embed when content unchanged.
+// syncSourceIfChanged — used by the nightly sync. Fetches once, compares the
+// hash of the extracted text and only re-embeds when content changed.
 // ---------------------------------------------------------------------------
 
-export async function ingestSourceIfChanged(
+export async function syncSourceIfChanged(
   sourceId: string,
-  productId: string,
-): Promise<"skipped" | "reindexed" | "error"> {
-  const source = await db.query.knowledgeSource.findFirst({
-    where: eq(knowledgeSource.id, sourceId),
-  });
-  if (!source) return "error";
+  options: { isFinalAttempt?: boolean } = {},
+): Promise<"skipped" | "reindexed"> {
+  const source = await db.query.knowledgeSource.findFirst({ where: eq(knowledgeSource.id, sourceId) });
+  if (!source) return "skipped";
+  if (!["url", "github", "sitemap", "website"].includes(source.type)) return "skipped";
 
-  try {
-    let currentContent = "";
+  const loaded = await loadSourceDocuments(source);
+  const currentHash = await hashDocuments(loaded.docs);
 
-    if (source.type === "url") {
-      if (!source.url) return "error";
-      currentContent = await fetchUrl(source.url);
-    } else if (source.type === "github") {
-      if (!source.url) return "error";
-      const files = await fetchGitHub(source.url);
-      currentContent = files.map((f) => f.content).join("\n\n");
-    } else if (source.type === "sitemap") {
-      if (!source.url) return "error";
-      const urls = await discoverSitemapUrls(source.url);
-      const texts: string[] = [];
-      for (const url of urls) {
-        try {
-          texts.push(await fetchUrl(url));
-        } catch {
-          // skip
-        }
-      }
-      currentContent = texts.join("\n\n");
-    } else {
-      // article/conversation — can't auto-fetch; only checked if explicitly requested
-      return "skipped";
-    }
-
-    const currentHash = await computeHash(currentContent);
-    const now = new Date();
-
-    if (currentHash === source.contentHash) {
-      // Content unchanged — update timestamp only
-      await db
-        .update(knowledgeSource)
-        .set({ lastCheckedAt: now })
-        .where(eq(knowledgeSource.id, sourceId));
-      return "skipped";
-    }
-
-    // Content changed — full re-index
-    await ingestSource(sourceId, productId);
-    return "reindexed";
-  } catch (err) {
+  if (currentHash === source.contentHash && source.status === "indexed") {
     await db
       .update(knowledgeSource)
-      .set({
-        status: source.status === "indexed" ? "indexed" : "error",
-        errorMessage: err instanceof Error ? err.message : String(err),
-        updatedAt: new Date(),
-      })
+      .set({ lastCheckedAt: new Date() })
       .where(eq(knowledgeSource.id, sourceId));
-    return "error";
+    return "skipped";
   }
+
+  await ingestSource(sourceId, { ...options, preloaded: loaded });
+  return "reindexed";
 }

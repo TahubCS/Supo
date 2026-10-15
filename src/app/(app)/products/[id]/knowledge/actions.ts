@@ -1,13 +1,15 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { headers } from "next/headers";
 
 import { db } from "@/db";
-import { knowledgeSource, knowledgeSuggestion } from "@/db/schema";
-import { env } from "@/lib/env";
-import { geminiEmbed, geminiGenerate } from "@/lib/knowledge/ai";
-import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
+import { knowledgeChunk, knowledgeSource, knowledgeSuggestion, widgetConfig } from "@/db/schema";
+import { queueSourceIndexing } from "@/lib/jobs";
+import { geminiGenerate } from "@/lib/knowledge/ai";
+import { DEFAULT_MAX_PAGES, MAX_PAGES_LIMIT } from "@/lib/knowledge/ingest";
+import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
+import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 import { requireProductAccess } from "@/lib/product-access";
 import { requireSecurityQuota } from "@/lib/security";
 
@@ -28,32 +30,81 @@ async function verifySuggestionAccess(suggestionId: string) {
 }
 
 export type AddSourceInput = {
-  type: "article" | "url" | "github";
+  type: "article" | "url" | "website" | "github";
   name: string;
   url?: string;
   content?: string;
+  maxPages?: number;
 };
 
-export async function addSource(productId: string, input: AddSourceInput): Promise<string> {
+const MAX_NAME_LENGTH = 200;
+const MAX_ARTICLE_LENGTH = 200_000;
+
+function validateHttpUrl(raw: string | undefined): string {
+  const value = raw?.trim() ?? "";
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Enter a valid URL starting with https://");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Only http and https URLs are supported");
+  }
+  return url.toString();
+}
+
+function validateSourceInput(input: AddSourceInput) {
+  const name = input.name.trim().slice(0, MAX_NAME_LENGTH);
+  if (!name) throw new Error("Name is required");
+
+  if (input.type === "article") {
+    const content = input.content?.trim() ?? "";
+    if (!content) throw new Error("Content is required");
+    if (content.length > MAX_ARTICLE_LENGTH) {
+      throw new Error(`Articles are limited to ${MAX_ARTICLE_LENGTH.toLocaleString()} characters`);
+    }
+    return { name, url: null, content, settings: null };
+  }
+
+  const url = validateHttpUrl(input.url);
+  if (input.type === "github" && !/^https:\/\/github\.com\/[^/]+\/[^/]+/.test(url)) {
+    throw new Error("Enter a GitHub repository URL like https://github.com/owner/repo");
+  }
+  const settings =
+    input.type === "website"
+      ? { maxPages: Math.max(1, Math.min(Math.round(input.maxPages ?? DEFAULT_MAX_PAGES), MAX_PAGES_LIMIT)) }
+      : null;
+  return { name, url, content: null, settings };
+}
+
+async function requireSourceQuota(productId: string, path: string) {
   const { session, membership } = await verifyProductAccess(productId);
   const headerList = await headers();
+  const event = {
+    userId: session.user.id,
+    organizationId: membership.organizationId,
+    productId,
+    headerList,
+    path,
+    method: "POST",
+  };
+  await requireSecurityQuota("knowledge.source.user.day", session.user.id, event);
+  await requireSecurityQuota("knowledge.source.organization.day", membership.organizationId, event);
+}
 
-  await requireSecurityQuota("knowledge.source.user.day", session.user.id, {
-    userId: session.user.id,
-    organizationId: membership.organizationId,
-    productId,
-    headerList,
-    path: "/knowledge/add-source",
-    method: "POST",
+async function verifySourceAccess(sourceId: string) {
+  const source = await db.query.knowledgeSource.findFirst({
+    where: eq(knowledgeSource.id, sourceId),
   });
-  await requireSecurityQuota("knowledge.source.organization.day", membership.organizationId, {
-    userId: session.user.id,
-    organizationId: membership.organizationId,
-    productId,
-    headerList,
-    path: "/knowledge/add-source",
-    method: "POST",
-  });
+  if (!source) throw new Error("Not found");
+  await verifyProductAccess(source.productId);
+  return source;
+}
+
+export async function addSource(productId: string, input: AddSourceInput): Promise<string> {
+  await requireSourceQuota(productId, "/knowledge/add-source");
+  const values = validateSourceInput(input);
 
   const sourceId = crypto.randomUUID();
   const now = new Date();
@@ -62,89 +113,151 @@ export async function addSource(productId: string, input: AddSourceInput): Promi
     id: sourceId,
     productId,
     type: input.type,
-    name: input.name,
-    url: input.url ?? null,
-    content: input.content ?? null,
+    name: values.name,
+    url: values.url,
+    content: values.content,
+    settings: values.settings,
     status: "indexing",
+    indexingStartedAt: now,
     chunkCount: 0,
     createdAt: now,
     updatedAt: now,
   });
 
-  // Fire ingestion in background — non-blocking
-  const baseUrl = env.BETTER_AUTH_URL;
-  fetch(`${baseUrl}/api/knowledge/ingest`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.CRON_SECRET ?? ""}`,
-    },
-    body: JSON.stringify({ sourceId, productId }),
-  }).catch(() => {
-    // Background — errors handled inside the route
-  });
-
+  await queueSourceIndexing(sourceId);
   return sourceId;
 }
 
-export async function deleteSource(sourceId: string): Promise<void> {
-  const source = await db.query.knowledgeSource.findFirst({
-    where: eq(knowledgeSource.id, sourceId),
-    with: { product: { columns: { id: true } } },
-  });
-  if (!source) throw new Error("Not found");
-  await verifyProductAccess(source.product.id);
+export type UpdateSourceInput = {
+  name?: string;
+  url?: string;
+  content?: string;
+  maxPages?: number;
+};
 
+export async function updateSource(sourceId: string, input: UpdateSourceInput): Promise<void> {
+  const source = await verifySourceAccess(sourceId);
+  const type = (source.type === "sitemap" ? "website" : source.type) as AddSourceInput["type"] | "conversation";
+  const values = validateSourceInput({
+    type: type === "conversation" ? "article" : type,
+    name: input.name ?? source.name,
+    url: input.url ?? source.url ?? undefined,
+    content: input.content ?? source.content ?? undefined,
+    maxPages: input.maxPages ?? source.settings?.maxPages,
+  });
+
+  const contentChanged =
+    values.url !== (type === "article" || type === "conversation" ? null : source.url) ||
+    values.content !== (type === "article" || type === "conversation" ? source.content?.trim() : null) ||
+    (values.settings?.maxPages ?? null) !== (source.settings?.maxPages ?? null);
+
+  await db
+    .update(knowledgeSource)
+    .set({
+      name: values.name,
+      url: values.url ?? source.url,
+      content: values.content ?? source.content,
+      settings: values.settings ?? source.settings,
+      updatedAt: new Date(),
+    })
+    .where(eq(knowledgeSource.id, sourceId));
+
+  if (contentChanged) {
+    await requireSourceQuota(source.productId, "/knowledge/update-source");
+    await queueSourceIndexing(sourceId);
+  }
+}
+
+export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
+  await verifySourceAccess(sourceId);
+  await db
+    .update(knowledgeSource)
+    .set({ enabled, updatedAt: new Date() })
+    .where(eq(knowledgeSource.id, sourceId));
+}
+
+export async function deleteSource(sourceId: string): Promise<void> {
+  await verifySourceAccess(sourceId);
   await db.delete(knowledgeSource).where(eq(knowledgeSource.id, sourceId));
 }
 
 export async function reindexSource(sourceId: string): Promise<void> {
-  const source = await db.query.knowledgeSource.findFirst({
-    where: eq(knowledgeSource.id, sourceId),
-    with: { product: { columns: { id: true } } },
-  });
-  if (!source) throw new Error("Not found");
+  const source = await verifySourceAccess(sourceId);
+  await requireSourceQuota(source.productId, "/knowledge/reindex-source");
 
-  const { session, membership } = await verifyProductAccess(source.product.id);
-  const headerList = await headers();
-  await requireSecurityQuota("knowledge.source.user.day", session.user.id, {
-    userId: session.user.id,
-    organizationId: membership.organizationId,
-    productId: source.product.id,
-    headerList,
-    path: "/knowledge/reindex-source",
-    method: "POST",
-  });
-  await requireSecurityQuota("knowledge.source.organization.day", membership.organizationId, {
-    userId: session.user.id,
-    organizationId: membership.organizationId,
-    productId: source.product.id,
-    headerList,
-    path: "/knowledge/reindex-source",
-    method: "POST",
-  });
+  await db
+    .update(knowledgeSource)
+    .set(
+      source.status === "indexed" && source.chunkCount > 0
+        ? { errorMessage: null, updatedAt: new Date() }
+        : { status: "indexing", indexingStartedAt: new Date(), errorMessage: null, updatedAt: new Date() },
+    )
+    .where(eq(knowledgeSource.id, sourceId));
 
-  if (source.status !== "indexed") {
-    await db
-      .update(knowledgeSource)
-      .set({ status: "indexing", chunkCount: 0, errorMessage: null, updatedAt: new Date() })
-      .where(eq(knowledgeSource.id, sourceId));
-  } else {
-    await db
-      .update(knowledgeSource)
-      .set({ errorMessage: null, updatedAt: new Date() })
-      .where(eq(knowledgeSource.id, sourceId));
-  }
+  await queueSourceIndexing(sourceId);
+}
 
-  const baseUrl = env.BETTER_AUTH_URL;
-  fetch(`${baseUrl}/api/knowledge/ingest`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.CRON_SECRET ?? ""}`,
+export type SourceStatus = {
+  id: string;
+  status: string;
+  errorMessage: string | null;
+  chunkCount: number;
+  pageCount: number;
+  lastCheckedAt: Date | null;
+  updatedAt: Date;
+};
+
+/** Lightweight status snapshot used by the UI while sources are indexing. */
+export async function getSourceStatuses(productId: string): Promise<SourceStatus[]> {
+  await verifyProductAccess(productId);
+  return db.query.knowledgeSource.findMany({
+    where: eq(knowledgeSource.productId, productId),
+    columns: {
+      id: true,
+      status: true,
+      errorMessage: true,
+      chunkCount: true,
+      pageCount: true,
+      lastCheckedAt: true,
+      updatedAt: true,
     },
-    body: JSON.stringify({ sourceId, productId: source.product.id }),
-  }).catch(() => {});
+  });
+}
+
+export type SourceChunkPreview = {
+  id: string;
+  content: string;
+  title: string | null;
+  url: string | null;
+  headingPath: string[];
+};
+
+export async function getSourceChunks(sourceId: string): Promise<SourceChunkPreview[]> {
+  await verifySourceAccess(sourceId);
+  const rows = await db.query.knowledgeChunk.findMany({
+    where: eq(knowledgeChunk.sourceId, sourceId),
+    columns: { id: true, content: true, metadata: true },
+    limit: 200,
+  });
+  const parsed = rows.map((row) => {
+    let meta: { title?: string; url?: string; headingPath?: string[]; chunkIndex?: number } = {};
+    try {
+      meta = row.metadata ? JSON.parse(row.metadata) : {};
+    } catch {
+      // ignore malformed metadata
+    }
+    return {
+      chunk: {
+        id: row.id,
+        content: row.content,
+        title: meta.title ?? null,
+        url: meta.url ?? null,
+        headingPath: Array.isArray(meta.headingPath) ? meta.headingPath : [],
+      },
+      order: `${meta.url ?? ""}#${String(meta.chunkIndex ?? 0).padStart(6, "0")}`,
+    };
+  });
+  return parsed.sort((a, b) => a.order.localeCompare(b.order)).map((entry) => entry.chunk);
 }
 
 export async function approveSuggestion(suggestionId: string): Promise<void> {
@@ -164,10 +277,11 @@ export async function approveSuggestion(suggestionId: string): Promise<void> {
       id: sourceId,
       productId: suggestion.productId,
       type: "conversation",
-      name: suggestion.question,
+      name: suggestion.question.slice(0, MAX_NAME_LENGTH),
       url: null,
       content: approvedContent,
       status: "indexing",
+      indexingStartedAt: now,
       chunkCount: 0,
       createdAt: now,
       updatedAt: now,
@@ -190,14 +304,7 @@ export async function approveSuggestion(suggestionId: string): Promise<void> {
     }
   });
 
-  fetch(`${env.BETTER_AUTH_URL}/api/knowledge/ingest`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.CRON_SECRET ?? ""}`,
-    },
-    body: JSON.stringify({ sourceId, productId: suggestion.productId }),
-  }).catch(() => {});
+  await queueSourceIndexing(sourceId);
 }
 
 export async function rejectSuggestion(
@@ -254,89 +361,50 @@ export async function updateSuggestionAnswer(
 
 export type QueryResult = {
   answer: string;
-  sources: { name: string; url: string | null }[];
+  sources: { title: string; url: string | null }[];
+  matches: { title: string; url: string | null; similarity: number | null; relevant: boolean; preview: string }[];
 };
 
 export async function testQuery(productId: string, question: string): Promise<QueryResult> {
-  const { session, membership } = await verifyProductAccess(productId);
+  const { session, membership, product: foundProduct } = await verifyProductAccess(productId);
   const headerList = await headers();
+  const trimmed = question.trim().slice(0, 2000);
+  if (!trimmed) throw new Error("Enter a question");
 
-  await requireSecurityQuota("knowledge.test.user.hour", session.user.id, {
+  const event = {
     userId: session.user.id,
     organizationId: membership.organizationId,
     productId,
     headerList,
     path: "/knowledge/test-query",
     method: "POST",
-  });
-  await requireSecurityQuota("knowledge.test.product.day", productId, {
-    userId: session.user.id,
-    organizationId: membership.organizationId,
-    productId,
-    headerList,
-    path: "/knowledge/test-query",
-    method: "POST",
-  });
-
-  const queryEmbedding = await geminiEmbed(question, productId);
-  const vectorStr = `[${queryEmbedding.join(",")}]`;
-
-  const results = await db.execute(
-    sql`SELECT kc.content, kc.metadata, ks.name AS source_name, ks.url AS source_url,
-               1 - (kc.embedding <=> ${vectorStr}::vector) AS similarity
-        FROM knowledge_chunk kc
-        JOIN knowledge_source ks ON ks.id = kc.source_id
-        WHERE kc.product_id = ${productId}
-          AND ks.status = 'indexed'
-        ORDER BY kc.embedding <=> ${vectorStr}::vector
-        LIMIT 5`,
-  );
-
-  type ChunkRow = {
-    content: string;
-    metadata: string | null;
-    source_name: string;
-    source_url: string | null;
-    similarity: number;
   };
+  await requireSecurityQuota("knowledge.test.user.hour", session.user.id, event);
+  await requireSecurityQuota("knowledge.test.product.day", productId, event);
 
-  const MIN_SIMILARITY = 0.4;
-  const chunks = (results.rows as ChunkRow[]).filter((c) => c.similarity >= MIN_SIMILARITY);
+  // Same retrieval + prompt as the live widget, so test results are representative.
+  const retrieval = await retrieveKnowledge({ productId, query: trimmed });
+  const config = await db.query.widgetConfig.findFirst({
+    where: eq(widgetConfig.productId, productId),
+    columns: { botName: true },
+  });
+  const system = buildSupportSystemPrompt({
+    botName: config?.botName ?? "Support",
+    productName: foundProduct.name,
+    productDescription: foundProduct.description,
+    chunks: retrieval.chunks,
+  });
+  const answer = await geminiGenerate(trimmed, system);
 
-  if (chunks.length === 0) {
-    try {
-      await createMissingKnowledgeSuggestion({
-        productId,
-        question,
-        reason:
-          "An admin tested this question, but no indexed knowledge matched above the retrieval threshold.",
-      });
-    } catch {
-      // The test answer should still render if gap capture fails.
-    }
-
-    return {
-      answer: "No relevant content found in the knowledge base for that question.",
-      sources: [],
-    };
-  }
-
-  const context = chunks
-    .map((c, i) => `[${i + 1}] ${c.source_name}\n${c.content}`)
-    .join("\n\n---\n\n");
-
-  const systemPrompt = `You are a helpful support assistant. Answer the user's question using ONLY the provided knowledge base context.
-Be concise and accurate. If the context doesn't contain enough information, say so clearly.
-Cite sources as [1], [2], etc.`;
-
-  const answer = await geminiGenerate(
-    `Knowledge base context:\n${context}\n\nQuestion: ${question}`,
-    systemPrompt,
-  );
-
-  const sources = chunks
-    .map((c) => ({ name: c.source_name, url: c.source_url }))
-    .filter((s, i, arr) => arr.findIndex((x) => x.name === s.name) === i);
-
-  return { answer, sources };
+  return {
+    answer,
+    sources: citationsFor(retrieval.chunks),
+    matches: retrieval.candidates.slice(0, 8).map((c) => ({
+      title: [c.title, ...c.headingPath].filter(Boolean).join(" > "),
+      url: c.url,
+      similarity: c.similarity,
+      relevant: c.relevant,
+      preview: c.content.slice(0, 240),
+    })),
+  };
 }

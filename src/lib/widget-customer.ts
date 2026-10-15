@@ -18,6 +18,8 @@ export type WidgetCustomerInput = {
   avatarUrl?: unknown;
   locale?: unknown;
   timezone?: unknown;
+  // HMAC-SHA256(identity secret, externalId ?? email), see src/lib/widget-identity.ts
+  userHash?: unknown;
 };
 
 export type NormalizedWidgetCustomer = {
@@ -112,9 +114,13 @@ export function normalizeWidgetCustomer(input: WidgetCustomerInput | null | unde
 export async function resolveWidgetCustomer({
   organizationId,
   input,
+  verified = false,
 }: {
   organizationId: string;
   input: WidgetCustomerInput | null | undefined;
+  // Unverified callers can only claim an identity, not edit it: an existing
+  // customer's profile is never overwritten by an unverified widget session.
+  verified?: boolean;
 }) {
   const normalized = normalizeWidgetCustomer(input);
   if (!normalized) return null;
@@ -168,16 +174,25 @@ export async function resolveWidgetCustomer({
       updatedAt: now,
     };
   } else {
-    const updates = {
-      externalId: found.externalId ?? normalized.externalId,
-      name: explicitName ?? found.name,
-      email: normalized.email ?? found.email,
-      avatarUrl: normalized.avatarUrl ?? found.avatarUrl,
-      locale: normalized.locale ?? found.locale,
-      timezone: normalized.timezone ?? found.timezone,
-      lastSeenAt: now,
-      updatedAt: now,
-    };
+    const updates = verified
+      ? {
+          externalId: found.externalId ?? normalized.externalId,
+          name: explicitName ?? found.name,
+          email: normalized.email ?? found.email,
+          avatarUrl: normalized.avatarUrl ?? found.avatarUrl,
+          locale: normalized.locale ?? found.locale,
+          timezone: normalized.timezone ?? found.timezone,
+          lastSeenAt: now,
+          updatedAt: now,
+        }
+      : {
+          // Only fill gaps; never replace what the customer record already has.
+          name: found.name || normalized.name,
+          locale: found.locale ?? normalized.locale,
+          timezone: found.timezone ?? normalized.timezone,
+          lastSeenAt: now,
+          updatedAt: now,
+        };
     await db.update(customer).set(updates).where(eq(customer.id, found.id));
     found = { ...found, ...updates };
   }

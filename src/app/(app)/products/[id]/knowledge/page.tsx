@@ -7,6 +7,9 @@ import { canAccessProductCapability, getProductAccess } from "@/lib/product-acce
 
 import { KnowledgeBase } from "./KnowledgeBase";
 
+// Server actions on this page start indexing jobs that run after the response.
+export const maxDuration = 300;
+
 export default async function KnowledgePage({
   params,
 }: {
@@ -42,7 +45,7 @@ export default async function KnowledgePage({
         },
       },
     },
-    orderBy: (s, { desc }) => [desc(s.createdAt)],
+    orderBy: (s, { desc }) => [desc(s.hits), desc(s.createdAt)],
   });
 
   return (

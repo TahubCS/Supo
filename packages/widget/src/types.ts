@@ -6,6 +6,9 @@ export type SupoCustomer = {
   avatarUrl?: string;
   locale?: string;
   timezone?: string;
+  // HMAC-SHA256(identity secret, externalId ?? email), computed by your backend.
+  // Required when identity verification is enabled for the product.
+  userHash?: string;
 };
 
 export type SupoAppearance = {
@@ -65,11 +68,32 @@ export type SupoWidgetConfigResponse = {
   };
 };
 
+export type SupoSource = {
+  title: string;
+  url: string | null;
+};
+
 export type SupoMessage = {
   id?: string;
   role: "customer" | "ai" | "agent" | "system" | "typing";
   body: string;
   createdAt?: string;
+  // Knowledge base articles an AI answer was based on.
+  sources?: SupoSource[];
+  // Display name of the human agent who sent the message.
+  senderName?: string;
+};
+
+export type SupoAgentAvailability = "online" | "offline" | "unknown";
+
+export type SupoSendResult = {
+  text: string;
+  sources: SupoSource[];
+  // Server ids for the customer message and the AI reply (for de-duplication).
+  customerMessageId: string | null;
+  aiMessageId: string | null;
+  // "none" when no AI reply was generated (a human is handling the chat).
+  replyMode: "ai" | "none";
 };
 
 export type SupoState = {
@@ -89,6 +113,10 @@ export type SupoEventMap = {
   "state-change": SupoState;
   "escalation-change": { status: SupoEscalationStatus };
   message: SupoMessage;
+  // A human agent is typing a reply.
+  typing: { agentName: string | null };
+  // Waiting for a human; `needsEmail` asks the customer for a follow-up address.
+  handoff: { availability: SupoAgentAvailability | null; needsEmail: boolean };
 };
 
 export type SupoEventName = keyof SupoEventMap;

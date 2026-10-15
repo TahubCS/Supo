@@ -1,17 +1,16 @@
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { streamText } from "ai";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import {
-  conversation,
-  message,
-  product,
-} from "@/db/schema";
-import { env } from "@/lib/env";
+import { conversation, message, product } from "@/db/schema";
 import { publishToConversation, publishToProductInbox } from "@/lib/ably";
-import { geminiEmbed, resolveGenerationModel } from "@/lib/knowledge/ai";
+import { decideHandoff } from "@/lib/handoff/policy";
+import { escalateConversation, maybeNotifyHandoffTimeout, type EscalationResult } from "@/lib/handoff/service";
+import { google, resolveGenerationModel } from "@/lib/knowledge/ai";
+import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
+import { buildRetrievalQuery, isSmallTalk } from "@/lib/knowledge/rank";
+import { citationsFor, retrieveKnowledge, type RetrievedChunk } from "@/lib/knowledge/retrieve";
 import { createMissingKnowledgeSuggestion } from "@/lib/knowledge/suggestions";
 import {
   isSecurityQuotaError,
@@ -24,6 +23,7 @@ import {
 } from "@/lib/widget-conversation-access";
 import { normalizeWidgetConfig } from "@/lib/widget-config";
 import { widgetCorsHeaders } from "@/lib/widget-cors";
+import { checkIdentity, normalizeIdentityMode } from "@/lib/widget-identity";
 import { checkWidgetOrigin } from "@/lib/widget-origin";
 import {
   normalizeWidgetCustomer,
@@ -85,17 +85,25 @@ function quotaErrorResponse(error: unknown, cors: Headers) {
   return NextResponse.json({ error: error.message }, { status: error.status, headers });
 }
 
-function shouldNotifyAgent(text: string, hasRelevantKnowledge: boolean): boolean {
-  if (!hasRelevantKnowledge) return true;
+type HistoryRow = { senderType: string; body: string };
 
-  const lower = text.toLowerCase();
-  return (
-    lower.includes("human agent") ||
-    lower.includes("live agent") ||
-    lower.includes("support agent") ||
-    lower.includes("connect you") ||
-    lower.includes("speak to")
-  );
+// Maps the transcript to model messages. Human agent replies are labelled so
+// the model does not mistake them for its own words; system notices are skipped.
+function toModelMessages(history: HistoryRow[]) {
+  return history
+    .filter((m) => m.senderType === "customer" || m.senderType === "ai" || m.senderType === "agent")
+    .slice(-20)
+    .map((m) => ({
+      role: (m.senderType === "customer" ? "user" : "assistant") as "user" | "assistant",
+      content: m.senderType === "agent" ? `[Reply from a human support teammate]\n${m.body}` : m.body,
+    }));
+}
+
+function handoffPromptNote(status: "pending" | "active" | null, availability: string | undefined): string | null {
+  if (status !== "pending") return null;
+  return availability === "offline"
+    ? "The customer has been handed to the human support team, who are offline right now and will follow up by email. Keep helping with what you can; do not promise when someone will reply."
+    : "The customer is waiting for a human support teammate to join this chat. Keep helping with what you can in the meantime; do not promise when someone will join.";
 }
 
 export async function POST(req: NextRequest) {
@@ -114,7 +122,7 @@ export async function POST(req: NextRequest) {
     conversationToken,
     customer: customerInfo,
   } = body;
-  const trimmedMessage = userMessage?.trim() ?? "";
+  const trimmedMessage = typeof userMessage === "string" ? userMessage.trim() : "";
   const normalizedCustomer = normalizeWidgetCustomer(customerInfo);
 
   if (!productId || !trimmedMessage || !normalizedCustomer) {
@@ -166,15 +174,29 @@ export async function POST(req: NextRequest) {
     throw error;
   }
 
-  const config = normalizeWidgetConfig(foundProduct.widgetConfigs[0]);
+  const widgetRow = foundProduct.widgetConfigs[0];
+  const config = normalizeWidgetConfig(widgetRow);
   const botName = config.botName;
+  const orgId = foundProduct.organizationId;
+
+  // ── Identity verification ────────────────────────────────────────────────
+  const identity = checkIdentity({
+    mode: normalizeIdentityMode(widgetRow?.identityVerification),
+    secret: widgetRow?.identitySecret,
+    customer: normalizedCustomer,
+    userHash: customerInfo?.userHash,
+  });
+  if (!identity.ok) {
+    return NextResponse.json({ error: identity.error }, { status: 401, headers: CORS });
+  }
 
   // ── Customer upsert ──────────────────────────────────────────────────────
   const now = new Date();
   let createdConversation = false;
   const resolvedCustomer = await resolveWidgetCustomer({
-    organizationId: foundProduct.organizationId,
+    organizationId: orgId,
     input: customerInfo,
+    verified: identity.verified,
   });
   if (!resolvedCustomer) {
     return NextResponse.json(
@@ -198,7 +220,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: CORS });
   }
 
-  if (!conv) {
+  // Resuming without the conversation token is only allowed for verified
+  // identities; otherwise anyone who knows a customer's email could read
+  // their conversation.
+  if (!conv && identity.verified) {
     conv = await db.query.conversation.findFirst({
       where: and(
         eq(conversation.productId, productId),
@@ -212,106 +237,47 @@ export async function POST(req: NextRequest) {
   if (!conv) {
     const convId = crypto.randomUUID();
     createdConversation = true;
-    const publicAccessToken = createConversationPublicAccessToken();
-    await db.insert(conversation).values({
-      id: convId,
-      productId,
-      customerId: cust.id,
-      status: "open",
-      aiHandled: true,
-      publicAccessToken,
-      subject: trimmedMessage.slice(0, 80),
-      lastMessageAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-    conv = {
-      id: convId,
-      productId,
-      customerId: cust.id,
-      status: "open",
-      assigneeId: null,
-      aiHandled: true,
-      escalationStatus: null,
-      escalatedAt: null,
-      publicAccessToken,
-      subject: trimmedMessage.slice(0, 80),
-      lastMessageAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const [inserted] = await db
+      .insert(conversation)
+      .values({
+        id: convId,
+        productId,
+        customerId: cust.id,
+        status: "open",
+        aiHandled: true,
+        publicAccessToken: createConversationPublicAccessToken(),
+        subject: trimmedMessage.slice(0, 80),
+        identityVerified: identity.verified,
+        customerLastSeenAt: now,
+        lastMessageAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    conv = inserted;
   } else if (conv.status !== "open") {
-    // Re-open resolved/snoozed conversations when the customer sends again
+    // Re-open resolved/snoozed conversations when the customer writes again.
     await db
       .update(conversation)
-      .set({ status: "open", updatedAt: now })
+      .set({ status: "open", snoozedUntil: null, resolvedAt: null, updatedAt: now })
       .where(eq(conversation.id, conv.id));
-    conv = { ...conv, status: "open", updatedAt: now };
+    conv = { ...conv, status: "open", snoozedUntil: null, resolvedAt: null, updatedAt: now };
   }
 
-  // Narrow type — conv is always defined after get-or-create above.
   if (!conv) {
     return NextResponse.json({ error: "Internal error" }, { status: 500, headers: CORS });
   }
+  const convId = conv.id;
 
-  const orgId = foundProduct.organizationId;
-
-  // ── Escalation gate — human agent has taken over, skip AI entirely ───────
-  if (conv.escalationStatus === "pending" || conv.escalationStatus === "active") {
-    const customerMessageId = crypto.randomUUID();
-    await db.insert(message).values({
-      id: customerMessageId,
-      conversationId: conv.id,
-      body: trimmedMessage,
-      senderType: "customer",
-      senderId: null,
-      createdAt: now,
-    });
-    await db
-      .update(conversation)
-      .set({ lastMessageAt: now, updatedAt: now })
-      .where(eq(conversation.id, conv.id));
-    publishToConversation(orgId, productId, conv.id, "message", {
-      id: customerMessageId,
-      body: trimmedMessage,
-      senderType: "customer",
-      createdAt: now.toISOString(),
-    }).catch(() => {});
-    publishToProductInbox(orgId, productId, "conversation_updated", {
-      conversationId: conv.id,
-      status: conv.status,
-      escalationStatus: conv.escalationStatus,
-      assigneeId: conv.assigneeId,
-      aiHandled: conv.aiHandled,
-      lastMessageAt: now.toISOString(),
-      latestMessage: {
-        id: customerMessageId,
-        body: trimmedMessage,
-        senderType: "customer",
-        createdAt: now.toISOString(),
-      },
-    }).catch(() => {});
-
-    const escHeaders = new Headers(CORS);
-    escHeaders.set("x-conversation-id", conv.id);
-    escHeaders.set("x-conversation-token", conv.publicAccessToken);
-    escHeaders.set("x-escalation-status", conv.escalationStatus);
-    const waitMsg =
-      conv.escalationStatus === "pending"
-        ? "Our team has been notified. An agent will be with you shortly."
-        : "You're connected with an agent.";
-    return new Response(waitMsg, { status: 200, headers: escHeaders });
-  }
-
-  // ── Save customer message ────────────────────────────────────────────────
+  // Per-conversation flood control applies whether or not a human is involved.
   try {
-    await requireSecurityQuota("chat.conversation.minute", conv.id, {
-      organizationId: foundProduct.organizationId,
+    await requireSecurityQuota("chat.conversation.minute", convId, {
+      organizationId: orgId,
       productId,
       headerList: req.headers,
       path: "/api/chat",
       method: "POST",
-      metadata: { conversationId: conv.id },
+      metadata: { conversationId: convId },
     });
   } catch (error) {
     const response = quotaErrorResponse(error, CORS);
@@ -319,206 +285,225 @@ export async function POST(req: NextRequest) {
     throw error;
   }
 
+  // ── Save customer message ────────────────────────────────────────────────
   const customerMessageId = crypto.randomUUID();
-  await db.insert(message).values({
-    id: customerMessageId,
-    conversationId: conv.id,
-    body: trimmedMessage,
-    senderType: "customer",
-    senderId: null,
-    createdAt: now,
-  });
+  const [savedCustomerMessage] = await db
+    .insert(message)
+    .values({
+      id: customerMessageId,
+      conversationId: convId,
+      body: trimmedMessage,
+      senderType: "customer",
+      senderId: null,
+      createdAt: now,
+    })
+    .returning({ seq: message.seq });
   await db
     .update(conversation)
-    .set({ lastMessageAt: now, updatedAt: now })
-    .where(eq(conversation.id, conv.id));
-  publishToConversation(orgId, productId, conv.id, "message", {
+    .set({ lastMessageAt: now, customerLastSeenAt: now, updatedAt: now })
+    .where(eq(conversation.id, convId));
+
+  const customerMessageEvent = {
     id: customerMessageId,
+    seq: savedCustomerMessage?.seq,
     body: trimmedMessage,
     senderType: "customer",
     createdAt: now.toISOString(),
-  }).catch(() => {});
+  };
+  publishToConversation(orgId, productId, convId, "message", customerMessageEvent).catch(() => {});
   if (createdConversation) {
-    publishToProductInbox(orgId, productId, "new_conversation", {
-      conversationId: conv.id,
-    }).catch(() => {});
+    publishToProductInbox(orgId, productId, "new_conversation", { conversationId: convId }).catch(() => {});
   }
   publishToProductInbox(orgId, productId, "conversation_updated", {
-    conversationId: conv.id,
-    status: conv.status,
+    conversationId: convId,
+    status: "open",
     escalationStatus: conv.escalationStatus,
     assigneeId: conv.assigneeId,
     aiHandled: conv.aiHandled,
     lastMessageAt: now.toISOString(),
-    latestMessage: {
-      id: customerMessageId,
-      body: trimmedMessage,
-      senderType: "customer",
-      createdAt: now.toISOString(),
-    },
+    latestMessage: customerMessageEvent,
   }).catch(() => {});
 
-  // ── Conversation history (last 20 turns for multi-turn context) ──────────
-  const history = await db.query.message.findMany({
-    where: eq(message.conversationId, conv.id),
-    orderBy: (m, { asc }) => [asc(m.createdAt)],
-  });
+  const baseHeaders = new Headers(CORS);
+  baseHeaders.set("x-conversation-id", convId);
+  baseHeaders.set("x-conversation-token", conv.publicAccessToken);
+  baseHeaders.set("x-message-id", customerMessageId);
 
-  const chatMessages = history
-    .filter((m) => m.senderType === "customer" || m.senderType === "ai" || m.senderType === "agent")
-    .slice(-20)
-    .map((m) => ({
-      role: (m.senderType === "customer" ? "user" : "assistant") as "user" | "assistant",
-      content: m.body,
-    }));
-
-  // ── RAG: semantic search over knowledge base ─────────────────────────────
-  type SourceRow = { content: string; source_name: string; source_url: string | null };
-  const sources: { name: string; url: string | null }[] = [];
-  let ragContext = "";
-  let foundRelevantKnowledge = false;
-
-  try {
-    const queryEmbedding = await geminiEmbed(trimmedMessage, productId);
-    const vectorStr = `[${queryEmbedding.join(",")}]`;
-
-    const results = await db.execute(
-      sql`SELECT kc.content, ks.name AS source_name, ks.url AS source_url,
-                 1 - (kc.embedding <=> ${vectorStr}::vector) AS similarity
-          FROM knowledge_chunk kc
-          JOIN knowledge_source ks ON ks.id = kc.source_id
-          WHERE kc.product_id = ${productId}
-            AND ks.status = 'indexed'
-            AND 1 - (kc.embedding <=> ${vectorStr}::vector) >= 0.4
-          ORDER BY kc.embedding <=> ${vectorStr}::vector
-          LIMIT 5`,
-    );
-
-    const chunks = results.rows as (SourceRow & { similarity: number })[];
-    if (chunks.length > 0) {
-      foundRelevantKnowledge = true;
-      ragContext = chunks
-        .map((c, i) => `[${i + 1}] ${c.source_name}\n${c.content}`)
-        .join("\n\n---\n\n");
-      for (const c of chunks) {
-        if (!sources.some((s) => s.name === c.source_name)) {
-          sources.push({ name: c.source_name, url: c.source_url });
-        }
-      }
-    }
-  } catch {
-    // KB not set up yet — proceed without context
+  // ── A human agent is handling this conversation: no AI reply ─────────────
+  if (conv.escalationStatus === "active") {
+    baseHeaders.set("x-escalation-status", "active");
+    baseHeaders.set("x-reply-mode", "none");
+    return new Response("Your message was sent to the support team.", { status: 200, headers: baseHeaders });
   }
 
-  if (!foundRelevantKnowledge) {
+  if (conv.escalationStatus === "pending") {
+    await maybeNotifyHandoffTimeout({
+      orgId,
+      productId,
+      conv,
+      timeoutSec: widgetRow?.handoffTimeoutSec ?? 300,
+      customerEmail: cust.email,
+    }).catch((error) => console.error("[chat] handoff timeout check failed", error));
+  }
+
+  // ── Conversation history ─────────────────────────────────────────────────
+  const recent = await db.query.message.findMany({
+    where: eq(message.conversationId, convId),
+    orderBy: (m, { desc: d }) => [d(m.seq)],
+    limit: 40,
+  });
+  const history = recent.reverse();
+  const previousCustomerMessages = history
+    .filter((m) => m.senderType === "customer" && m.id !== customerMessageId)
+    .map((m) => m.body)
+    .slice(-3);
+
+  // ── Knowledge retrieval (hybrid vector + keyword search) ────────────────
+  const smallTalk = isSmallTalk(trimmedMessage);
+  let retrievedChunks: RetrievedChunk[] = [];
+  let retrievalFailed = false;
+
+  if (!smallTalk) {
+    try {
+      const retrieval = await retrieveKnowledge({
+        productId,
+        query: buildRetrievalQuery(trimmedMessage, previousCustomerMessages),
+      });
+      retrievedChunks = retrieval.chunks;
+    } catch (error) {
+      retrievalFailed = true;
+      console.error("[chat] knowledge retrieval failed", error);
+    }
+  }
+
+  const foundRelevantKnowledge = retrievedChunks.length > 0;
+  const citations = citationsFor(retrievedChunks);
+
+  if (!foundRelevantKnowledge && !smallTalk && !retrievalFailed) {
     createMissingKnowledgeSuggestion({
       productId,
       question: trimmedMessage,
-      sourceConversationId: conv.id,
-      reason:
-        "A customer asked this in the widget, but no indexed knowledge matched above the retrieval threshold.",
+      sourceConversationId: convId,
+      reason: "A customer asked this in the widget, but no indexed knowledge matched it.",
     }).catch(() => {});
   }
 
+  // ── Handoff decision (before streaming so the widget learns immediately) ─
+  let escalation: EscalationResult | null = null;
+  let escalationStatus = conv.escalationStatus as "pending" | "active" | null;
+
+  if (escalationStatus === null) {
+    const decision = decideHandoff({
+      message: trimmedMessage,
+      previousCustomerMessages,
+      unansweredStreak: conv.unansweredStreak,
+      // A retrieval outage is not the customer's problem; don't count it.
+      foundKnowledge: foundRelevantKnowledge || retrievalFailed,
+      smallTalk,
+    });
+    if (decision.nextUnansweredStreak !== conv.unansweredStreak) {
+      await db
+        .update(conversation)
+        .set({ unansweredStreak: decision.nextUnansweredStreak })
+        .where(eq(conversation.id, convId));
+    }
+    if (decision.escalate && decision.reason) {
+      escalation = await escalateConversation({
+        orgId,
+        productId,
+        conversationId: convId,
+        reason: decision.reason,
+        subject: conv.subject,
+        customerName: cust.name,
+        customerEmail: cust.email,
+      });
+      escalationStatus = escalation.escalationStatus;
+    }
+  }
+
+  if (escalationStatus) baseHeaders.set("x-escalation-status", escalationStatus);
+  if (escalation) {
+    baseHeaders.set("x-handoff-availability", escalation.availability);
+    if (escalation.needsEmail) baseHeaders.set("x-needs-email", "1");
+  }
+
+  // Just handed off and the knowledge base has nothing to add: the handoff
+  // notice (a system message) is the reply, so skip the AI answer.
+  if (escalation?.escalated && !foundRelevantKnowledge) {
+    baseHeaders.set("x-reply-mode", "none");
+    return new Response("Connecting you with our support team.", { status: 200, headers: baseHeaders });
+  }
+
   // ── System prompt ────────────────────────────────────────────────────────
-  const systemLines = [
-    `You are ${botName}, a helpful and friendly customer support assistant for ${foundProduct.name}.`,
-    foundProduct.description ? `About this product: ${foundProduct.description}` : null,
-    ragContext
-      ? `Use the following knowledge base to answer accurately. Cite sources as [1], [2], etc. when relevant:\n\n${ragContext}\n\nIf the question is not covered by the knowledge base, acknowledge it and offer to connect the customer with a human agent.`
-      : "Answer as helpfully as you can based on context. If you are not confident, offer to connect the customer with a human agent.",
-    "Keep responses concise, clear, and friendly. Never make up information you are not sure about.",
+  const systemPrompt = [
+    buildSupportSystemPrompt({
+      botName,
+      productName: foundProduct.name,
+      productDescription: foundProduct.description,
+      chunks: retrievedChunks,
+    }),
+    handoffPromptNote(escalationStatus, escalation?.availability),
   ]
     .filter(Boolean)
     .join("\n\n");
 
   // ── Stream generation ────────────────────────────────────────────────────
-  const google = createGoogleGenerativeAI({ apiKey: env.GOOGLE_GEMINI_API_KEY });
   const modelId = await resolveGenerationModel();
+  const aiMessageId = crypto.randomUUID();
 
-  const convId = conv.id;
-  const handoffCustomerName = cust.name;
-  const conversationSubject = conv.subject;
   const result = streamText({
     model: google(modelId),
-    system: systemLines,
-    messages: chatMessages,
+    system: systemPrompt,
+    messages: toModelMessages(history),
     onFinish: async ({ text }) => {
+      if (!text.trim()) return;
       const finishAt = new Date();
-      const newMsgId = crypto.randomUUID();
-      const notifyAgent = shouldNotifyAgent(text, foundRelevantKnowledge);
-      const nextEscalationStatus = notifyAgent ? "pending" : null;
-      const nextAiHandled = !notifyAgent;
-      await db.insert(message).values({
-        id: newMsgId,
-        conversationId: convId,
-        body: text,
-        senderType: "ai",
-        senderId: null,
-        createdAt: finishAt,
-      });
-      await db
-        .update(conversation)
-        .set({
-          lastMessageAt: finishAt,
-          updatedAt: finishAt,
-          aiHandled: nextAiHandled,
-          escalationStatus: nextEscalationStatus,
-          escalatedAt: notifyAgent ? finishAt : null,
-          assigneeId: notifyAgent ? null : conv.assigneeId,
-        })
-        .where(eq(conversation.id, convId));
-      // Push AI reply to any agent viewing this conversation in real-time.
-      publishToConversation(orgId, productId, convId, "message", {
-        id: newMsgId,
-        body: text,
-        senderType: "ai",
-        createdAt: finishAt.toISOString(),
-      }).catch(() => {});
-      publishToProductInbox(orgId, productId, "conversation_updated", {
-        conversationId: convId,
-        status: "open",
-        escalationStatus: nextEscalationStatus,
-        assigneeId: notifyAgent ? null : conv.assigneeId,
-        aiHandled: nextAiHandled,
-        lastMessageAt: finishAt.toISOString(),
-        latestMessage: {
-          id: newMsgId,
+      const [saved] = await db
+        .insert(message)
+        .values({
+          id: aiMessageId,
+          conversationId: convId,
           body: text,
           senderType: "ai",
-          createdAt: finishAt.toISOString(),
-        },
+          senderId: null,
+          sources: citations.length > 0 ? citations : null,
+          createdAt: finishAt,
+        })
+        .returning({ seq: message.seq });
+      // Only timestamps here: escalation state may have changed while
+      // streaming (customer pressed the button, an agent joined).
+      await db
+        .update(conversation)
+        .set({ lastMessageAt: finishAt, updatedAt: finishAt })
+        .where(eq(conversation.id, convId));
+
+      const aiMessageEvent = {
+        id: aiMessageId,
+        seq: saved?.seq,
+        body: text,
+        senderType: "ai",
+        sources: citations,
+        createdAt: finishAt.toISOString(),
+      };
+      publishToConversation(orgId, productId, convId, "message", aiMessageEvent).catch(() => {});
+      publishToProductInbox(orgId, productId, "conversation_updated", {
+        conversationId: convId,
+        lastMessageAt: finishAt.toISOString(),
+        latestMessage: aiMessageEvent,
       }).catch(() => {});
-      if (notifyAgent) {
-        publishToConversation(orgId, productId, convId, "escalation_update", {
-          status: "pending",
-        }).catch(() => {});
-        publishToProductInbox(orgId, productId, "needs_agent", {
-          conversationId: convId,
-          subject: conversationSubject,
-          customerName: handoffCustomerName,
-          escalatedAt: finishAt.toISOString(),
-          reason: foundRelevantKnowledge
-            ? "The AI response offered human handoff."
-            : "No relevant knowledge matched the customer question.",
-        }).catch(() => {});
-      }
     },
   });
 
   // ── Response ─────────────────────────────────────────────────────────────
-  // toTextStreamResponse() returns a plain text/plain stream — easy for the
-  // widget to consume with a ReadableStream reader.
+  // Plain text stream — easy for the widget to consume with a ReadableStream.
   const streamResponse = result.toTextStreamResponse();
   const headers = new Headers(streamResponse.headers);
-
-  CORS.forEach((value, key) => headers.set(key, value));
-  // Widget reads x-conversation-id on the first response and stores it for subsequent turns.
-  headers.set("x-conversation-id", convId);
-  headers.set("x-conversation-token", conv.publicAccessToken);
-  // Optional: widget can display source attributions after the stream ends.
-  if (sources.length > 0) {
-    headers.set("x-sources", JSON.stringify(sources));
+  baseHeaders.forEach((value, key) => headers.set(key, value));
+  headers.set("x-ai-message-id", aiMessageId);
+  // Citations for the answer. Base64-encoded JSON: header values must be
+  // Latin-1, and page titles often are not (setting them raw throws).
+  if (citations.length > 0) {
+    headers.set("x-sources", Buffer.from(JSON.stringify(citations), "utf8").toString("base64"));
   }
 
   return new Response(streamResponse.body, { status: 200, headers });

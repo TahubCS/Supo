@@ -10,6 +10,10 @@ export const WIDGET_EXPOSED_HEADERS = [
   "x-sources",
   "x-escalation-status",
   "x-message-id",
+  "x-ai-message-id",
+  "x-reply-mode",
+  "x-handoff-availability",
+  "x-needs-email",
 ].join(", ");
 
 export const MAX_ALLOWED_ORIGINS = 25;

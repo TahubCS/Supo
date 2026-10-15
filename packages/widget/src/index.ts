@@ -1,5 +1,6 @@
 export { initSupo } from "./dom/mount";
 export type {
+  SupoAgentAvailability,
   SupoAppearance,
   SupoCustomer,
   SupoEscalationStatus,
@@ -8,6 +9,8 @@ export type {
   SupoHooks,
   SupoInitOptions,
   SupoMessage,
+  SupoSendResult,
+  SupoSource,
   SupoRealtimeMode,
   SupoRuntime,
   SupoState,

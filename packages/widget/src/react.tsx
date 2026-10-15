@@ -112,6 +112,7 @@ function resolveCustomer(customer: SupoInitOptions["customer"]): SupoCustomer | 
 }
 
 export type {
+  SupoAgentAvailability,
   SupoAppearance,
   SupoCustomer,
   SupoEscalationStatus,
@@ -120,6 +121,8 @@ export type {
   SupoHooks,
   SupoInitOptions,
   SupoMessage,
+  SupoSendResult,
+  SupoSource,
   SupoRealtimeMode,
   SupoRuntime,
   SupoState,

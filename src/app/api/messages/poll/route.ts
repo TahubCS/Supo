@@ -1,8 +1,9 @@
-import { and, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, ne } from "drizzle-orm";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { db } from "@/db";
-import { message, product } from "@/db/schema";
+import { conversation, customer, message, product, user, widgetConfig } from "@/db/schema";
+import { maybeNotifyHandoffTimeout } from "@/lib/handoff/service";
 import {
   getSecurityIp,
   isSecurityQuotaError,
@@ -120,24 +121,85 @@ export async function GET(req: NextRequest) {
     throw error;
   }
 
-  const messages = await db.query.message.findMany({
-    where: and(
-      eq(message.conversationId, conversationId),
-      gt(message.createdAt, sinceDate),
-    ),
-    orderBy: (m, { asc }) => [asc(m.createdAt)],
+  // Lossless cursor: `after` is the last message seq the client has seen.
+  // `since` (timestamp) is kept for older widget builds.
+  const afterParam = searchParams.get("after");
+  const afterSeq = afterParam !== null && /^\d{1,15}$/.test(afterParam) ? Number(afterParam) : null;
+
+  const rows = await db
+    .select({
+      id: message.id,
+      seq: message.seq,
+      body: message.body,
+      senderType: message.senderType,
+      sources: message.sources,
+      createdAt: message.createdAt,
+      senderName: user.name,
+    })
+    .from(message)
+    .leftJoin(user, eq(user.id, message.senderId))
+    .where(
+      and(
+        eq(message.conversationId, conversationId),
+        // Internal notes are never visible to customers.
+        ne(message.senderType, "note"),
+        afterSeq !== null ? gt(message.seq, afterSeq) : gt(message.createdAt, sinceDate),
+      ),
+    )
+    .orderBy(asc(message.seq))
+    .limit(200);
+
+  // Track presence (throttled) so agents' replies are emailed only when the
+  // customer has actually left.
+  const now = Date.now();
+  if (!conv.customerLastSeenAt || now - conv.customerLastSeenAt.getTime() > 30_000) {
+    await db
+      .update(conversation)
+      .set({ customerLastSeenAt: new Date(now) })
+      .where(eq(conversation.id, conv.id));
+  }
+
+  const [widgetRow, cust] = await Promise.all([
+    db.query.widgetConfig.findFirst({
+      where: eq(widgetConfig.productId, productId),
+      columns: { handoffTimeoutSec: true },
+    }),
+    db.query.customer.findFirst({ where: eq(customer.id, conv.customerId), columns: { email: true } }),
+  ]);
+  if (conv.escalationStatus === "pending") {
+    await maybeNotifyHandoffTimeout({
+      orgId: foundProduct.organizationId,
+      productId,
+      conv,
+      timeoutSec: widgetRow?.handoffTimeoutSec ?? 300,
+      customerEmail: cust?.email ?? null,
+    }).catch((error) => console.error("[poll] handoff timeout check failed", error));
+  }
+  const fresh = await db.query.conversation.findFirst({
+    where: eq(conversation.id, conv.id),
+    columns: { escalationStatus: true, handoffTimeoutNotifiedAt: true, followUpEmail: true, lastMessageAt: true },
   });
+  const escalationStatus = fresh?.escalationStatus ?? conv.escalationStatus;
+  const needsEmail =
+    escalationStatus === "pending" &&
+    Boolean(fresh?.handoffTimeoutNotifiedAt) &&
+    !(fresh?.followUpEmail ?? cust?.email);
 
   return NextResponse.json(
     {
-      messages: messages.map((m) => ({
+      messages: rows.map((m) => ({
         id: m.id,
+        seq: m.seq,
         body: m.body,
         senderType: m.senderType,
+        senderName: m.senderType === "agent" ? (m.senderName ?? "Support") : undefined,
+        sources: m.sources ?? undefined,
         createdAt: m.createdAt.toISOString(),
       })),
-      escalationStatus: conv.escalationStatus,
-      lastMessageAt: conv.lastMessageAt.toISOString(),
+      cursor: rows.at(-1)?.seq ?? afterSeq,
+      escalationStatus,
+      needsEmail,
+      lastMessageAt: (fresh?.lastMessageAt ?? conv.lastMessageAt).toISOString(),
     },
     { headers: CORS },
   );

@@ -2,6 +2,27 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.6
+
+- **Human handoff fixes:** customers can keep typing while waiting for an agent (the composer was disabled), and the AI keeps helping until someone joins.
+- Conversation history (customer, AI, agent and system messages) is restored after a page reload, and live updates resume automatically. Previously a reload while waiting for an agent left the widget stuck.
+- Lossless polling with a message sequence cursor (`after`); polling stops once realtime is connected and catches up after reconnects.
+- Agent replies show the agent's name; "<agent> is typing…" indicator.
+- When no agent is available the widget asks for a follow-up email (`submitFollowUpEmail()` on the headless client, `handoff` event).
+- The "talk to a person" button is always available after the first message instead of only when the AI used certain phrases.
+- `customer.userHash` for identity verification (HMAC-SHA256 of `externalId ?? email` with the product's identity secret).
+- Messages are de-duplicated by server id (`x-message-id`, `x-ai-message-id`); a stale stored conversation is discarded instead of failing.
+- Hooks and `supo:*` window events no longer fire twice.
+- New headless methods: `resume()`, `submitFollowUpEmail()`, `getHandoff()`; new events: `typing`, `handoff`.
+- Removed the "BETA" banner.
+
+## 0.1.0-alpha.5
+
+- AI answers now show the knowledge base articles they were based on as clickable source chips.
+- Added `sendMessageWithSources()` to the headless client (returns `{ text, sources }`); `sendMessage()` is unchanged.
+- `SupoMessage` gained an optional `sources` field, also populated from polling.
+- Reads the `x-sources` response header as base64-encoded JSON (the server no longer sends raw JSON, which broke on non-ASCII titles).
+
 ## 0.1.0-alpha.4
 
 - Added stable customer identity support through `customer.externalId`.

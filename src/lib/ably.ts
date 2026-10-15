@@ -57,20 +57,30 @@ export async function publishToProductInbox(
     .publish(event, { v: 1, ...data });
 }
 
-// Returns the count of agents currently present in the product inbox.
-// Used by the widget to show "N agents online" before escalation.
-export async function getPresenceCount(orgId: string, productId: string): Promise<number> {
+export function isRealtimeConfigured(): boolean {
+  return Boolean(env.ABLY_API_KEY);
+}
+
+// Distinct agents (not browser tabs) currently present in the product inbox.
+// Returns null when presence is unknown (Ably not configured or unreachable).
+export async function getOnlineAgentCount(orgId: string, productId: string): Promise<number | null> {
   const rest = getRestClient();
-  if (!rest) return 0;
+  if (!rest) return null;
   try {
     const result = (await rest.channels
       .get(presenceChannelName(orgId, productId))
       .presence.get()) as PresenceGetResult;
     // REST presence.get() returns PresenceMessage[] in practice; handle both shapes.
-    return Array.isArray(result) ? result.length : (result?.items?.length ?? 0);
+    const members = Array.isArray(result) ? result : (result?.items ?? []);
+    return new Set(members.map((member) => member.clientId ?? member.connectionId)).size;
   } catch {
-    return 0;
+    return null;
   }
+}
+
+// Kept for the public presence endpoint used by older widget builds.
+export async function getPresenceCount(orgId: string, productId: string): Promise<number> {
+  return (await getOnlineAgentCount(orgId, productId)) ?? 0;
 }
 
 // Creates a short-lived, capability-restricted Ably TokenRequest.
