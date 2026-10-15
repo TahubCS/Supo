@@ -32,6 +32,7 @@ const WIDGET_ESCALATE_PATHS = new Set([
   "/api/widget/escalations",
   "/api/widget/contact",
   "/api/widget/ratings",
+  "/api/help/feedback",
 ]);
 const WIDGET_READ_PATHS = new Set([
   "/api/widget/config",
@@ -243,6 +244,7 @@ export const config = {
     "/api/messages/poll",
     "/api/ably/token",
     "/api/widget/:path*",
+    "/api/help/:path*",
     "/api/auth/sign-in/email",
     "/api/auth/sign-up/email",
     "/api/auth/request-password-reset",

@@ -10,12 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-import { addSource, type AddSourceInput } from "./actions";
+import { addSource, uploadSourceFile, type AddSourceInput } from "./actions";
 
-type SourceType = AddSourceInput["type"];
+// "file" is parsed server-side and stored as an article source.
+type SourceType = AddSourceInput["type"] | "file";
 
 const SOURCE_TYPES: { id: SourceType; label: string }[] = [
   { id: "article", label: "Article" },
+  { id: "file", label: "File" },
   { id: "website", label: "Website" },
   { id: "url", label: "Single page" },
   { id: "github", label: "GitHub" },
@@ -33,6 +35,7 @@ export function AddSourceDialog({ productId }: { productId: string }) {
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
   const [maxPages, setMaxPages] = useState(50);
+  const [file, setFile] = useState<File | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function reset() {
@@ -41,11 +44,34 @@ export function AddSourceDialog({ productId }: { productId: string }) {
     setUrl("");
     setContent("");
     setMaxPages(50);
+    setFile(null);
   }
 
-  const needsUrl = type !== "article";
+  const needsUrl = type !== "article" && type !== "file";
+
+  function handleUpload() {
+    if (!file) return;
+    const form = new FormData();
+    form.set("file", file);
+    form.set("name", name.trim());
+    startTransition(async () => {
+      const result = await uploadSourceFile(productId, form);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("File added — indexing has started");
+      setOpen(false);
+      reset();
+      router.refresh();
+    });
+  }
 
   function handleSubmit() {
+    if (type === "file") {
+      handleUpload();
+      return;
+    }
     if (!name.trim()) return;
     const input: AddSourceInput = {
       type,
@@ -105,6 +131,25 @@ export function AddSourceDialog({ productId }: { productId: string }) {
               onChange={(e) => setName(e.target.value)}
             />
           </div>
+
+          {type === "file" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="source-file" className="text-xs text-[color:var(--text-secondary)]">Document</Label>
+              <Input
+                id="source-file"
+                type="file"
+                accept=".pdf,.docx,.md,.markdown,.txt,.csv,.html,.htm"
+                onChange={(e) => {
+                  const next = e.target.files?.[0] ?? null;
+                  setFile(next);
+                  if (next && !name.trim()) setName(next.name.replace(/\.[a-z0-9]+$/i, ""));
+                }}
+              />
+              <p className="text-xs text-[color:var(--text-tertiary)]">
+                PDF, Word (.docx), Markdown, text, CSV or HTML, up to 4 MB. Scanned PDFs without a text layer can&apos;t be read.
+              </p>
+            </div>
+          )}
 
           {type === "article" && (
             <div className="space-y-1.5">
@@ -168,7 +213,7 @@ export function AddSourceDialog({ productId }: { productId: string }) {
             onClick={handleSubmit}
             disabled={
               isPending ||
-              !name.trim() ||
+              (type === "file" ? !file : !name.trim()) ||
               (type === "article" && !content.trim()) ||
               (needsUrl && !url.trim())
             }

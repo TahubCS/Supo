@@ -66,6 +66,14 @@ export type SupoWidgetConfigResponse = {
     pollingFallback: true;
     betaNotice: true;
   };
+  // Present when the product has a published help center.
+  helpCenter?: SupoHelpCenter | null;
+};
+
+export type SupoHelpCenter = {
+  url: string;
+  // Popular articles, suggested when the chat is empty.
+  articles: { title: string; url: string }[];
 };
 
 export type SupoSource = {

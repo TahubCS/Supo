@@ -4,6 +4,15 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Help center
+
+- **Public help center** at `/help/{slug}` with categories, search, article pages, helpful/not-helpful voting, related articles, SEO metadata, JSON-LD, `sitemap.xml` and `robots.txt`.
+- **Article editor:** Markdown with preview, categories, custom URLs, draft/publish, version history with restore, Cmd/Ctrl+S, and import from PDF/DOCX/Markdown/text/CSV/HTML.
+- **AI integration:** publishing mirrors the article into the knowledge base (re-indexed on every edit, removed on unpublish). AI citations link to the public article, and change if the help center address changes.
+- **Widget:** popular articles are suggested in the empty chat (SDK `0.1.0-alpha.9`).
+- **Knowledge base uploads:** a new File source type (PDF via `unpdf`, Word via `mammoth`, up to 4 MB).
+- Migration `0024_help_center` adds `help_center`, `article_category`, `article` (with a weighted FTS column and GIN index) and `article_version`.
+
 ### SLAs, business hours and CSAT
 
 - **Business hours:** per-product timezone, weekly schedule and holidays (Inbox settings). Handoff availability treats agents as offline outside business hours, so customers get the email follow-up path.

@@ -6,6 +6,7 @@ export type {
   SupoEscalationStatus,
   SupoEventHandler,
   SupoEventName,
+  SupoHelpCenter,
   SupoHooks,
   SupoInitOptions,
   SupoMessage,

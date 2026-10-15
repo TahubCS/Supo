@@ -2,6 +2,7 @@ import { createSupoClient } from "../headless";
 import type {
   SupoCustomer,
   SupoEscalationStatus,
+  SupoHelpCenter,
   SupoInitOptions,
   SupoMessage,
   SupoRuntime,
@@ -32,6 +33,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   document.body.appendChild(host);
 
   let appearance = mergeAppearance(undefined, options.appearance);
+  let helpCenter: SupoHelpCenter | null = null;
   let customer = resolveCustomer(options.customer) ?? storage.getCustomer();
   let isOpen = options.behavior?.startOpen === true;
   let connection: ConnectionState = "idle";
@@ -99,6 +101,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
   void loadWidgetConfig({ apiBaseUrl, productId: options.productId })
     .then((config) => {
       appearance = mergeAppearance(config.appearance, options.appearance);
+      helpCenter = config.helpCenter ?? null;
       render();
       emitter.emit("ready", { productId: options.productId });
     })
@@ -159,6 +162,7 @@ export function initSupo(options: SupoInitOptions): SupoRuntime {
         needsEmail,
         agentTyping: connection === "agent_active" ? agentTyping : null,
         rating,
+        helpCenter,
       },
     })}${renderBubble({
       isOpen,

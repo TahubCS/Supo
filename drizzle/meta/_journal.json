@@ -169,6 +169,13 @@
       "when": 1778631360000,
       "tag": "0023_sla_business_hours_csat",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1778631420000,
+      "tag": "0024_help_center",
+      "breakpoints": true
     }
   ]
 }

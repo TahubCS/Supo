@@ -108,6 +108,14 @@ drizzle/                           SQL migrations
 - **Inbox settings:** manual claiming or round-robin routing with a per-agent cap, and macro management.
 - **Activity:** recent customer threads, plus a product audit log for admins and developers.
 
+## Help Center
+
+- **Authoring** (Help center page): categories, Markdown articles with live preview, draft/publish, version history with restore, and import from PDF, Word (.docx), Markdown, text, CSV or HTML (up to 4 MB).
+- **Public site** at `/help/{slug}`: category home page, full-text search (stemmed Postgres FTS plus title prefix matching), article pages with "Was this helpful?" voting, related articles, canonical URLs, Open Graph and Article JSON-LD. Published articles are listed in `/sitemap.xml`.
+- **AI and widget:** published articles are mirrored into the knowledge base automatically, so the AI answers from them and cites the public article URL. The widget suggests popular articles before the first message.
+- Article Markdown is rendered with `react-markdown` (no raw HTML, unsafe URL schemes stripped).
+- The Knowledge page's **File** source type uses the same document parser.
+
 ## SLAs, Business Hours and CSAT
 
 - **Business hours** (Inbox settings): a timezone, a weekly schedule and holidays. Outside business hours customers are told the team will follow up by email, even if someone is signed in.
