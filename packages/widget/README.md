@@ -169,9 +169,9 @@ const unsubscribe = supo.on("state-change", (state) => {
 
 ## API Base URL
 
-The SDK is installed from npm, but it still calls your Supo app at runtime.
+The SDK is installed from npm, but it still calls your Supo app at runtime. Without `apiBaseUrl` it calls Supo Cloud at `https://supo.muhammadtahubkhatri.dev`.
 
-Use `apiBaseUrl` for local development and self-hosted installs:
+Set `apiBaseUrl` for local development and self-hosted installs:
 
 ```ts
 initSupo({
@@ -182,7 +182,7 @@ initSupo({
 
 ## Fallback Script
 
-For CMS/no-code sites that cannot install npm packages, use the hosted fallback script from your Supo app instead.
+For CMS/no-code sites that cannot install npm packages, use the hosted fallback script from your Supo app instead. Without `apiBaseUrl` it calls the origin `widget.js` was loaded from.
 
 ```html
 <script>

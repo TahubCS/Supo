@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { PRODUCTION_ORIGIN, authTrustedOrigins, normalizeOrigin } from "@/lib/trusted-origins";
 
+import { DEFAULT_API_BASE_URL } from "../../../packages/widget/src/runtime/config";
+
 describe("normalizeOrigin", () => {
   it("reduces URLs to their origin and rejects junk", () => {
     expect(normalizeOrigin("https://app.acme.com/path?x=1")).toBe("https://app.acme.com");
@@ -54,5 +56,11 @@ describe("authTrustedOrigins", () => {
 
   it("trusts localhost during development", () => {
     expect(authTrustedOrigins({ NODE_ENV: "development" })).toContain("http://localhost:3000");
+  });
+});
+
+describe("PRODUCTION_ORIGIN", () => {
+  it("is the widget SDK's default apiBaseUrl", () => {
+    expect(DEFAULT_API_BASE_URL).toBe(PRODUCTION_ORIGIN);
   });
 });

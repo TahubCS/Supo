@@ -1,7 +1,8 @@
 import type { SupoAppearance, SupoInitOptions, SupoWidgetConfigResponse } from "../types";
 import { normalizeAppearance } from "./validation";
 
-export const DEFAULT_API_BASE_URL = "https://app.supo.com";
+// Supo Cloud. Must match PRODUCTION_ORIGIN in src/lib/trusted-origins.ts.
+export const DEFAULT_API_BASE_URL = "https://supo.muhammadtahubkhatri.dev";
 
 export const DEFAULT_APPEARANCE: Required<SupoAppearance> = {
   botName: "Support",
@@ -20,16 +21,22 @@ export const DEFAULT_APPEARANCE: Required<SupoAppearance> = {
   showPoweredBy: true,
 };
 
+// Not derived from `document.currentScript`: for npm/ESM usage that can be the
+// host page's own bundle. The widget.js embed passes its origin explicitly.
 export function resolveApiBaseUrl(options: Pick<SupoInitOptions, "apiBaseUrl">): string {
-  const explicit = options.apiBaseUrl?.trim().replace(/\/$/, "");
-  if (explicit) return explicit;
+  const explicit = options.apiBaseUrl?.trim().replace(/\/+$/, "");
+  return explicit || DEFAULT_API_BASE_URL;
+}
 
-  const script = typeof document !== "undefined" ? document.currentScript : null;
-  if (script instanceof HTMLScriptElement && script.src) {
+export function scriptOrigin(
+  script: Pick<HTMLScriptElement, "src"> | SVGScriptElement | null | undefined,
+): string | undefined {
+  if (!script || !("src" in script) || !script.src) return undefined;
+  try {
     return new URL(script.src).origin;
+  } catch {
+    return undefined;
   }
-
-  return DEFAULT_API_BASE_URL;
 }
 
 export function joinUrl(base: string, path: string): string {

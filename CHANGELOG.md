@@ -4,6 +4,11 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Widget SDK 0.1.0-alpha.11
+
+- **Default `apiBaseUrl`:** `@supoapp/widget` falls back to the production origin (`https://supo.muhammadtahubkhatri.dev`) instead of `https://app.supo.com`, and npm entry points no longer derive it from `document.currentScript`. A test keeps the SDK default equal to `PRODUCTION_ORIGIN`. See `packages/widget/CHANGELOG.md`.
+- Not yet on npm: the maintainer publishes it with `bun run --cwd packages/widget release:alpha`.
+
 ### Better Auth 1.7 upgrade and auth hardening
 
 - **CI:** fixed the type errors from the Better Auth 1.7.10 upgrade. `@better-auth/infra` is now 0.4.20, which is built for Better Auth 1.7 and removes the duplicate `@better-auth/core` copies that broke the `dashClient` and `organization` client types.
