@@ -54,7 +54,7 @@
     "@upstash/redis": "^1.37.0",
     "ably": "^2.21.0",
     "ai": "^6.0.168",
-    "better-auth": "1.6.9",
+    "better-auth": "1.7.10",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "cmdk": "1.1.1",
