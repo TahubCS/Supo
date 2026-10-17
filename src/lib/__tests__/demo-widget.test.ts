@@ -76,6 +76,26 @@ describe("mountDemoWidget", () => {
     expect(window.Supo).toBeUndefined();
   });
 
+  it("keeps control of the current widget when a stale script finishes after it", async () => {
+    // Leave the page while the first bundle is loading, come back, and let the
+    // second bundle finish first: the late first script must not orphan it.
+    const cleanupFirst = mountDemoWidget("prod_demo");
+    await nextTick();
+    const firstScript = widgetScripts()[0];
+    cleanupFirst();
+
+    const cleanupSecond = mountDemoWidget("prod_demo");
+    await nextTick();
+    const current = runWidgetScript(widgetScripts()[0]);
+    const stale = runWidgetScript(firstScript);
+
+    expect(stale.destroy).toHaveBeenCalledOnce();
+    expect(current.destroy).not.toHaveBeenCalled();
+
+    cleanupSecond();
+    expect(current.destroy).toHaveBeenCalledOnce();
+  });
+
   it("leaves a widget that loaded while mounted running", async () => {
     mountDemoWidget("prod_demo");
     await nextTick();
