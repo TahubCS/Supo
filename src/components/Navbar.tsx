@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
+import { API_DOCS_URL } from "@/lib/site";
 
 export function Navbar() {
   return (
@@ -30,17 +31,19 @@ export function Navbar() {
               Pricing
             </Link>
             <Link
-              href="#api"
+              href="#developers"
               className="text-sm text-[color:var(--text-secondary)] transition-colors hover:text-foreground"
             >
-              API
+              Developers
             </Link>
-            <Link
-              href="#docs"
+            <a
+              href={API_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="text-sm text-[color:var(--text-secondary)] transition-colors hover:text-foreground"
             >
-              Documentation
-            </Link>
+              API docs
+            </a>
           </div>
 
           <div className="flex items-center gap-3">
