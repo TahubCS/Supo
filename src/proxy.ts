@@ -2,7 +2,7 @@ import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
 import { type NextRequest, NextResponse } from "next/server";
 
-const isProduction = process.env.NODE_ENV === "production";
+import { authTrustedOrigins, normalizeOrigin } from "@/lib/trusted-origins";
 
 // Upstash Redis is required in production for public auth/chat rate limits.
 // Local development fails open so developers are not blocked by infrastructure.
@@ -52,26 +52,7 @@ const AUTH_POST_PATHS = new Set([
   "/api/auth/send-verification-email",
 ]);
 
-function normalizeOrigin(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    return new URL(url).origin;
-  } catch {
-    return url.trim().replace(/\/+$/, "");
-  }
-}
-
-const trustedOrigins = new Set(
-  [
-    process.env.BETTER_AUTH_URL ? normalizeOrigin(process.env.BETTER_AUTH_URL) : null,
-    "https://supo.muhammadtahubkhatri.dev",
-    process.env.VERCEL_PROJECT_PRODUCTION_URL
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-      : null,
-    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
-    ...(isProduction ? [] : ["http://localhost:3000"]),
-  ].filter(Boolean) as string[],
-);
+const trustedOrigins = new Set(authTrustedOrigins());
 
 const limiters = redis
   ? {
@@ -132,19 +113,6 @@ function retryAfter(resetMs: number): string {
   return String(Math.max(1, Math.ceil((resetMs - Date.now()) / 1000)));
 }
 
-function rateLimitUnavailable(path: string): NextResponse {
-  return new NextResponse(
-    JSON.stringify({ error: "Rate limiting is not configured. Set Upstash Redis env vars." }),
-    {
-      status: 503,
-      headers: {
-        "Content-Type": "application/json",
-        ...(isWidgetPath(path) ? CORS_HEADERS : {}),
-      },
-    },
-  );
-}
-
 function jsonResponse(
   path: string,
   status: number,
@@ -162,18 +130,8 @@ function jsonResponse(
 }
 
 function isAllowedAuthOrigin(req: NextRequest): boolean {
-  const origin = req.headers.get("origin");
-  if (!origin) return false;
-  const normalized = normalizeOrigin(origin);
-  if (!normalized) return false;
-  if (trustedOrigins.has(normalized)) return true;
-  try {
-    const url = new URL(normalized);
-    if (url.hostname.endsWith(".vercel.app")) return true;
-  } catch {
-    return false;
-  }
-  return false;
+  const origin = normalizeOrigin(req.headers.get("origin"));
+  return origin !== null && trustedOrigins.has(origin);
 }
 
 function getContentTypeMediaType(req: NextRequest): string {
