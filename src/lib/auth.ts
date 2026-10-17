@@ -109,14 +109,14 @@ export const auth = betterAuth({
     ipAddress: {
       ipAddressHeaders: ["x-vercel-forwarded-for", "x-forwarded-for"],
     },
-  },
-  experimental: {
-    joins: true,
+    database: {
+      joins: true,
+    },
   },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,
-    sendResetPasswordEmail: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
+    sendResetPassword: async ({ user, url }: { user: { email: string; name?: string | null }; url: string }) => {
       await resend.emails.send({
         from: defaultSenderEmail,
         to: user.email,
