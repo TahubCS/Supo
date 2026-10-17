@@ -15,6 +15,7 @@ All notable changes to Supo will be documented in this file.
 - **Timing:** verification and reset emails are sent after the response, so response time no longer reveals whether an account exists.
 - **Email verification:** links last 24 hours, as the email says. They expired after 1 hour before.
 - **OAuth errors:** failed social sign-ins return to the sign-in page with a message instead of Better Auth's default error page.
+- **Dependencies:** `bun audit` findings went from 112 (6 critical) to 4 (none critical, none in production code paths). Updated `next` 16.3.8, `undici` 6.28.1, `vitest` 4.1.12, `ai`, `@ai-sdk/google` and transitive packages.
 
 ### GitHub App for the knowledge base
 
