@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isOriginAllowed,
+  isSameOriginRequest,
   normalizeAllowedOrigin,
   parseAllowedOrigins,
   widgetCorsHeaders,
@@ -59,6 +60,21 @@ describe("isOriginAllowed", () => {
   it("rejects missing origins when restricted, but trusts the dashboard origin", () => {
     expect(isOriginAllowed(null, allowed)).toBe(false);
     expect(isOriginAllowed("https://supo.app", allowed, ["https://supo.app"])).toBe(true);
+  });
+});
+
+describe("isSameOriginRequest", () => {
+  it("trusts browser requests from this deployment's own pages", () => {
+    // Same-origin GETs carry no Origin header, only Fetch Metadata.
+    expect(isSameOriginRequest(new Headers({ "sec-fetch-site": "same-origin" }))).toBe(true);
+  });
+
+  it("does not trust cross-origin, same-site or unlabeled requests", () => {
+    expect(isSameOriginRequest(new Headers({ "sec-fetch-site": "cross-site" }))).toBe(false);
+    expect(isSameOriginRequest(new Headers({ "sec-fetch-site": "same-site" }))).toBe(false);
+    expect(isSameOriginRequest(new Headers({ "sec-fetch-site": "none" }))).toBe(false);
+    expect(isSameOriginRequest(new Headers({ origin: "https://evil.com" }))).toBe(false);
+    expect(isSameOriginRequest(new Headers())).toBe(false);
   });
 });
 

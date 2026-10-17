@@ -60,6 +60,16 @@ export function parseAllowedOrigins(input: string | string[]): { origins: string
   return { origins: origins.slice(0, MAX_ALLOWED_ORIGINS), invalid };
 }
 
+/**
+ * True for requests from a page served by this deployment (the dashboard or
+ * the landing-page demo). Browsers omit `Origin` on same-origin GETs but always
+ * send Fetch Metadata, which pages cannot set. Non-browser clients can forge it,
+ * as they can forge `Origin`; the allow-list only governs browser embedding.
+ */
+export function isSameOriginRequest(headers: Headers): boolean {
+  return headers.get("sec-fetch-site") === "same-origin";
+}
+
 export function isOriginAllowed(
   origin: string | null,
   allowedOrigins: readonly string[] | null | undefined,

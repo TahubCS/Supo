@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { widgetConfig } from "@/db/schema";
 import { env } from "@/lib/env";
-import { isOriginAllowed, widgetCorsHeaders } from "@/lib/widget-cors";
+import { isOriginAllowed, isSameOriginRequest, widgetCorsHeaders } from "@/lib/widget-cors";
 
 function trustedOrigins(): string[] {
   try {
@@ -25,8 +25,8 @@ export type WidgetOriginCheck = {
 };
 
 /**
- * Applies a product's widget origin allow-list. The Supo dashboard origin is
- * always trusted so the in-app widget preview keeps working.
+ * Applies a product's widget origin allow-list. Supo's own pages are always
+ * trusted, so the in-app preview and the landing-page demo keep working.
  */
 export async function checkWidgetOrigin(
   headers: Headers,
@@ -41,7 +41,7 @@ export async function checkWidgetOrigin(
   const allowedOrigins = row?.allowedOrigins ?? [];
 
   return {
-    allowed: isOriginAllowed(origin, allowedOrigins, trustedOrigins()),
+    allowed: isSameOriginRequest(headers) || isOriginAllowed(origin, allowedOrigins, trustedOrigins()),
     cors: widgetCorsHeaders(origin, allowedOrigins, methods),
   };
 }
