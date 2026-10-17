@@ -263,7 +263,7 @@ supo.identify({ id: user.id, name: user.name });`;
             </div>
             <p className="mt-4 text-sm leading-relaxed text-[color:var(--text-secondary)]">
               Keep <code>apiBaseUrl</code> in local snippets so the SDK knows which Supo server to
-              call. Supo Cloud can default this later when the production domain is final.
+              call. Without it, the SDK calls Supo Cloud.
             </p>
           </div>
         </div>

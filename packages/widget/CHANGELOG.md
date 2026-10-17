@@ -2,6 +2,12 @@
 
 All notable changes to `@supoapp/widget` will be documented here.
 
+## 0.1.0-alpha.11
+
+- **Default `apiBaseUrl`:** when `apiBaseUrl` is omitted, the SDK now calls Supo Cloud at `https://supo.muhammadtahubkhatri.dev`. The old default, `https://app.supo.com`, isn't a Supo server, so every request failed.
+- `initSupo`, `SupoProvider` and `createSupoClient` no longer guess the server from `document.currentScript`. When `initSupo` ran at the top level of a classic-script bundle (webpack, Next.js), that was the host site's own script, so requests went to the host site. The `widget.js` script embed still uses the origin it was loaded from.
+- Pass `apiBaseUrl` for local development and self-hosted installs.
+
 ## 0.1.0-alpha.10
 
 - `runtime.on("message")` handlers now run after the widget has applied the message, so calling `runtime.reset()` from a handler is no longer undone.
