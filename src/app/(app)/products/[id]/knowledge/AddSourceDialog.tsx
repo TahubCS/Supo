@@ -133,7 +133,7 @@ export function AddSourceDialog({ productId }: { productId: string }) {
           <DialogTitle className="text-base">Add knowledge source</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 pt-1">
+        <div className="min-w-0 space-y-4 pt-1">
           <div className="flex overflow-hidden rounded-lg border border-border">
             {SOURCE_TYPES.map((t) => (
               <button

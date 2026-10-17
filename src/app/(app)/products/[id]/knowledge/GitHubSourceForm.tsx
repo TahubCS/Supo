@@ -180,12 +180,12 @@ export function GitHubSourceForm({ productId, onAdded }: { productId: string; on
 
   if (!selected) {
     return (
-      <div className="space-y-3">
+      <div className="min-w-0 space-y-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[color:var(--text-tertiary)]" />
           <Input placeholder="Search repositories" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-8" />
         </div>
-        <div className="max-h-64 overflow-y-auto rounded-lg border border-border">
+        <div className="max-h-64 overflow-y-auto overflow-x-hidden rounded-lg border border-border">
           {repos === null && <p className={`${hintClass} p-3`}>Loading repositories…</p>}
           {repos !== null && filtered.length === 0 && (
             <p className={`${hintClass} p-3`}>
@@ -201,11 +201,11 @@ export function GitHubSourceForm({ productId, onAdded }: { productId: string; on
               className="flex w-full items-start gap-2 border-b border-border px-3 py-2 text-left last:border-b-0 hover:bg-[color:var(--card-elevated)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <div className="min-w-0 flex-1">
-                <p className="flex items-center gap-1.5 truncate text-sm text-foreground">
-                  {repo.fullName}
+                <p className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
+                  <span className="truncate">{repo.fullName}</span>
                   {repo.private && <Lock className="size-3 shrink-0 text-[color:var(--text-tertiary)]" />}
                 </p>
-                {repo.description && <p className={`${hintClass} truncate`}>{repo.description}</p>}
+                {repo.description && <p className={`${hintClass} line-clamp-2 break-words`}>{repo.description}</p>}
               </div>
               {repo.alreadyAdded && <span className={hintClass}>Added</span>}
             </button>
@@ -214,7 +214,7 @@ export function GitHubSourceForm({ productId, onAdded }: { productId: string; on
         {loadErrors.map((error) => (
           <p key={error} className="text-xs text-[color:var(--status-error)]">{error}</p>
         ))}
-        <div className="flex flex-wrap gap-x-3 gap-y-1">
+        <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1">
           <a href={connection.installUrl ?? "#"} className={`${hintClass} inline-flex items-center gap-1 underline`}>
             Add an account or change repository access <ExternalLink className="size-3" />
           </a>
