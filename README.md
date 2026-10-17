@@ -155,7 +155,7 @@ Supo currently includes early-stage SaaS hardening:
 - Admin impersonation is intentionally disabled.
 - Super-admin actions are audited.
 - Admin can view/revoke sessions and ban/unban users.
-- Public auth and all widget endpoints (including `/api/widget/*` aliases) are rate limited through Upstash Redis.
+- Public auth and all widget endpoints (including `/api/widget/*` aliases) are rate limited through Upstash Redis. Better Auth's built-in limiter keeps its counters in the same Redis.
 - Products can restrict the widget to an allow-list of website origins (Widget → Allowed websites).
 - Realtime tokens are scoped to a single product; agents cannot subscribe to other products' conversations or publish inbox events.
 - Internal and cron routes use a dedicated `CRON_SECRET` with constant-time comparison.
@@ -190,6 +190,7 @@ Notes:
 
 - `DATABASE_URL` should use `sslmode=verify-full` for production Neon connections.
 - `BETTER_AUTH_URL` must match the deployed app URL in production.
+- `BETTER_AUTH_TRUSTED_ORIGINS` (optional) lists extra exact origins allowed to use auth, comma-separated. This deployment's own Vercel URLs are trusted automatically.
 - `BETTER_AUTH_ADMIN_USER_IDS` should contain only the trusted owner/admin Better Auth user id.
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
 - The email channel is optional. Set `INBOUND_EMAIL_DOMAIN` (a receiving domain in Resend) and `RESEND_WEBHOOK_SECRET` (the signing secret of a Resend webhook for `email.received` pointed at `/api/inbound/email`).
@@ -276,7 +277,7 @@ Before deploying:
 1. Set all required environment variables in Vercel.
 2. Set `BETTER_AUTH_URL` to the production URL.
 3. Ensure `DATABASE_URL` uses secure SSL settings.
-4. Set Upstash Redis env vars so production rate limiting does not fail closed.
+4. Set Upstash Redis env vars. Without them rate limiting fails open.
 5. Run migrations against the production database.
 6. Run `bun run lint` and `bun run build`.
 

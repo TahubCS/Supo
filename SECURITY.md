@@ -23,7 +23,8 @@ Include:
 - Admin impersonation is intentionally disabled.
 - High-risk admin actions are audited.
 - Public widget conversations use `conversationId + conversationToken` for read, polling, escalation, and realtime subscription access.
-- Production rate limiting uses Upstash Redis and fails closed if Redis env vars are missing.
+- Production rate limiting uses Upstash Redis, for both the proxy limits and Better Auth's built-in limiter. Limiters fail open if Redis is missing or unreachable, so set the Upstash env vars in production.
+- Auth trusted origins are exact origins only. Shared hosting wildcards such as `*.vercel.app` are never trusted.
 - Suspicious new IP/user-agent fingerprints are logged, and owner alerts are sent for super-admin account fingerprints.
 
 ## Deferred Protections
