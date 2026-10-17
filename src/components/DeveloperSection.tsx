@@ -2,33 +2,44 @@
 
 import { ArrowRight, Check, Copy } from "lucide-react";
 import { motion } from "motion/react";
-import Link from "next/link";
 import { useState } from "react";
 
+import { API_DOCS_URL } from "@/lib/site";
+import { PRODUCTION_ORIGIN } from "@/lib/trusted-origins";
+
+// Snippets must match the published @supoapp/widget package and docs/API.md.
 const codeExamples = {
-  curl: `curl -X POST https://api.supo.ai/v1/chat \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
+  react: `npm install @supoapp/widget@alpha
+
+import { SupoProvider, SupoWidget } from "@supoapp/widget/react";
+
+<SupoProvider
+  productId="YOUR_PRODUCT_ID"
+  apiBaseUrl="${PRODUCTION_ORIGIN}"
+  customer={{ externalId: user.id, name: user.name, email: user.email }}
+>
+  <SupoWidget />
+</SupoProvider>`,
+  script: `<script>
+  window.SupoSettings = { productId: "YOUR_PRODUCT_ID" };
+</script>
+<script async src="${PRODUCTION_ORIGIN}/widget.js"></script>`,
+  rest: `curl -X POST ${PRODUCTION_ORIGIN}/api/v1/knowledge/search \\
+  -H "Authorization: Bearer supo_sk_..." \\
   -H "Content-Type: application/json" \\
-  -d '{
-    "message": "How do I reset my password?",
-    "user_id": "user_123"
-  }'`,
-  node: `const client = new Supo('YOUR_API_KEY');
-
-const response = await client.chat.create({
-  message: 'How do I reset my password?',
-  userId: 'user_123'
-});`,
-  python: `client = Supo(api_key='YOUR_API_KEY')
-
-response = client.chat.create(
-  message='How do I reset my password?',
-  user_id='user_123'
-)`,
+  -d '{ "query": "How do I reset my password?", "answer": true }'`,
 };
 
-export function APIPlayground() {
-  const [activeTab, setActiveTab] = useState<"curl" | "node" | "python">("curl");
+type Tab = keyof typeof codeExamples;
+
+const tabLabels: Record<Tab, string> = {
+  react: "React",
+  script: "Script tag",
+  rest: "REST API",
+};
+
+export function DeveloperSection() {
+  const [activeTab, setActiveTab] = useState<Tab>("react");
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -38,7 +49,7 @@ export function APIPlayground() {
   };
 
   return (
-    <section id="api" className="relative border-t border-border px-6 py-24">
+    <section id="developers" className="relative border-t border-border px-6 py-24">
       <div className="mx-auto max-w-7xl">
         <div className="grid grid-cols-1 items-start gap-16 lg:grid-cols-2">
           <motion.div
@@ -46,22 +57,23 @@ export function APIPlayground() {
             whileInView={{ opacity: 1, x: 0 }}
             viewport={{ once: true }}
           >
-            <p className="mb-3 text-sm text-[color:var(--text-secondary)]">API</p>
+            <p className="mb-3 text-sm text-[color:var(--text-secondary)]">Developers</p>
             <h2 className="mb-4 text-3xl font-bold tracking-tight text-foreground md:text-4xl">
               Built for developers
             </h2>
             <p className="mb-6 text-base leading-relaxed text-[color:var(--text-secondary)]">
-              Integrate AI-powered support into your application with our REST API
-              and SDKs. Available for Node.js, Python, and PHP with full TypeScript
-              support.
+              Embed the widget with the React SDK or a script tag, identify signed-in customers, and
+              automate the rest with the REST API and signed webhooks.
             </p>
-            <Link
-              href="#"
+            <a
+              href={API_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
               className="group inline-flex items-center gap-2 text-sm text-foreground transition-colors hover:text-[color:var(--text-secondary)]"
             >
-              View documentation
+              Read the API reference
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-1" />
-            </Link>
+            </a>
           </motion.div>
 
           <motion.div
@@ -71,7 +83,7 @@ export function APIPlayground() {
           >
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-                {(["curl", "node", "python"] as const).map((tab) => (
+                {(Object.keys(codeExamples) as Tab[]).map((tab) => (
                   <button
                     key={tab}
                     type="button"
@@ -82,7 +94,7 @@ export function APIPlayground() {
                         : "text-[color:var(--text-secondary)] hover:text-foreground"
                     }`}
                   >
-                    {tab === "curl" ? "cURL" : tab === "node" ? "Node.js" : "Python"}
+                    {tabLabels[tab]}
                   </button>
                 ))}
                 <div className="flex-1" />

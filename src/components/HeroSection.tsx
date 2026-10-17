@@ -1,10 +1,29 @@
 "use client";
 
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, FileText } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
+
+const heroPoints = [
+  { title: "Cited answers", description: "Replies cite the docs they came from" },
+  { title: "Human handoff", description: "Agents pick up with the full conversation" },
+  { title: "One-line embed", description: "A script tag or the React SDK" },
+];
+
+// Illustrates the product flow; the handoff line is the widget's real reply.
+const exampleConversation: { from: "customer" | "ai" | "agent"; text: string; source?: string }[] = [
+  { from: "customer", text: "How do I rotate an API key?" },
+  {
+    from: "ai",
+    text: "Create a new key under Integrations → API keys, switch your app to it, then revoke the old one. New keys are shown only once, so copy it right away.",
+    source: "API reference",
+  },
+  { from: "customer", text: "Thanks. Can I talk to someone about my invoice?" },
+  { from: "ai", text: "Connecting you with our support team." },
+  { from: "agent", text: "Hi, I'm on the billing team. Let me pull up your invoice." },
+];
 
 export function HeroSection() {
   return (
@@ -18,7 +37,7 @@ export function HeroSection() {
         >
           <span className="h-1.5 w-1.5 rounded-full bg-foreground animate-pulse" />
           <span className="text-xs text-[color:var(--text-secondary)]">
-            Now with Gemini 3.1 integration
+            Now in open alpha
           </span>
         </motion.div>
 
@@ -39,8 +58,8 @@ export function HeroSection() {
           transition={{ duration: 0.4, delay: 0.2 }}
           className="mb-8 max-w-2xl text-lg leading-relaxed text-[color:var(--text-secondary)]"
         >
-          Resolve 80% of customer inquiries instantly with AI agents. Seamlessly hand
-          off complex cases to your team with full context.
+          Answer customer questions instantly with AI grounded in your own docs,
+          and hand complex cases to your team with the full conversation.
         </motion.p>
 
         <motion.div
@@ -54,7 +73,7 @@ export function HeroSection() {
             size="default"
             className="rounded-lg bg-foreground px-6 py-2.5 text-sm text-background hover:bg-foreground/90"
           >
-            <Link href="/sign-up">Start free trial</Link>
+            <Link href="/sign-up">Get started free</Link>
           </Button>
           <Button
             asChild
@@ -75,24 +94,12 @@ export function HeroSection() {
           transition={{ duration: 0.4, delay: 0.4 }}
           className="mb-16 grid grid-cols-1 gap-8 sm:grid-cols-3"
         >
-          <div>
-            <div className="mb-1 text-3xl font-bold text-foreground">2.3s</div>
-            <div className="text-sm text-[color:var(--text-secondary)]">
-              Average response time
+          {heroPoints.map((point) => (
+            <div key={point.title}>
+              <div className="mb-1 text-base font-semibold text-foreground">{point.title}</div>
+              <div className="text-sm text-[color:var(--text-secondary)]">{point.description}</div>
             </div>
-          </div>
-          <div>
-            <div className="mb-1 text-3xl font-bold text-foreground">94%</div>
-            <div className="text-sm text-[color:var(--text-secondary)]">
-              Resolution rate
-            </div>
-          </div>
-          <div>
-            <div className="mb-1 text-3xl font-bold text-foreground">99.9%</div>
-            <div className="text-sm text-[color:var(--text-secondary)]">
-              Uptime SLA
-            </div>
-          </div>
+          ))}
         </motion.div>
 
         <motion.div
@@ -103,53 +110,37 @@ export function HeroSection() {
         >
           <div className="overflow-hidden rounded-lg border border-border bg-card">
             <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <div className="flex items-center gap-4">
-                <div className="text-sm text-foreground">Overview</div>
-                <div className="text-sm text-[color:var(--text-secondary)]">
-                  Conversations
-                </div>
-                <div className="text-sm text-[color:var(--text-secondary)]">
-                  Analytics
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="h-2 w-2 rounded-full bg-[color:var(--status-success)]" />
-                <span className="text-xs text-[color:var(--text-secondary)]">
-                  All systems operational
-                </span>
-              </div>
+              <div className="text-sm text-foreground">Example conversation</div>
+              <div className="text-xs text-[color:var(--text-secondary)]">Cited answer, then a handoff</div>
             </div>
-
-            <div className="grid grid-cols-1 gap-4 p-6 md:grid-cols-3">
-              <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--card-elevated)] p-4">
-                <div className="mb-2 text-xs text-[color:var(--text-secondary)]">
-                  Active Conversations
+            <div className="space-y-4 p-6">
+              {exampleConversation.map((message, index) => (
+                <div
+                  key={index}
+                  className={`flex flex-col gap-1 ${message.from === "customer" ? "items-end" : "items-start"}`}
+                >
+                  {message.from === "customer" ? null : (
+                    <span className="text-xs text-[color:var(--text-tertiary)]">
+                      {message.from === "ai" ? "AI" : "Agent"}
+                    </span>
+                  )}
+                  <div
+                    className={`max-w-md rounded-lg px-4 py-2.5 text-sm ${
+                      message.from === "customer"
+                        ? "bg-foreground text-background"
+                        : "border border-[color:var(--border-subtle)] bg-[color:var(--card-elevated)] text-foreground"
+                    }`}
+                  >
+                    {message.text}
+                  </div>
+                  {message.source ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-[color:var(--text-secondary)]">
+                      <FileText className="size-3" />
+                      {message.source}
+                    </span>
+                  ) : null}
                 </div>
-                <div className="mb-1 text-2xl font-bold text-foreground">127</div>
-                <div className="flex items-center gap-1 text-xs text-[color:var(--status-success)]">
-                  <Check className="size-3" />
-                  <span>+12% from last hour</span>
-                </div>
-              </div>
-              <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--card-elevated)] p-4">
-                <div className="mb-2 text-xs text-[color:var(--text-secondary)]">
-                  AI Resolution
-                </div>
-                <div className="mb-1 text-2xl font-bold text-foreground">82%</div>
-                <div className="flex items-center gap-1 text-xs text-[color:var(--status-success)]">
-                  <Check className="size-3" />
-                  <span>+5% from yesterday</span>
-                </div>
-              </div>
-              <div className="rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--card-elevated)] p-4">
-                <div className="mb-2 text-xs text-[color:var(--text-secondary)]">
-                  Avg. Response
-                </div>
-                <div className="mb-1 text-2xl font-bold text-foreground">2.1s</div>
-                <div className="flex items-center gap-1 text-xs text-[color:var(--text-secondary)]">
-                  <span>Within SLA</span>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
