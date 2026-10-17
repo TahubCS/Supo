@@ -10,10 +10,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
 
+// Better Auth redirects failed OAuth flows here with `?error=<code>`. Only fixed
+// messages are shown; the query string is attacker-controllable.
+function authErrorMessage(code: string | null): string | null {
+  if (!code) return null;
+  if (code === "account_not_linked") {
+    return "An account with this email already exists. Sign in with your password instead.";
+  }
+  return "We couldn't complete sign-in. Please try again.";
+}
+
 function SignInContent() {
   const router = useRouter();
   const params = useSearchParams();
   const justReset = params.get("reset") === "1";
+  const authError = authErrorMessage(params.get("error"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +75,11 @@ function SignInContent() {
       {justReset ? (
         <p className="mb-4 rounded-lg border border-border bg-[color:var(--card-elevated)] px-4 py-3 text-sm text-[color:var(--text-secondary)]">
           Password reset. Sign in with your new password.
+        </p>
+      ) : null}
+      {authError ? (
+        <p role="alert" className="mb-4 rounded-lg border border-border bg-[color:var(--card-elevated)] px-4 py-3 text-sm text-[color:var(--status-error,#ef4444)]">
+          {authError}
         </p>
       ) : null}
       <h1 className="mb-2 text-2xl font-bold tracking-tight text-foreground">

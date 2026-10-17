@@ -4,6 +4,19 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Better Auth 1.7 upgrade and auth hardening
+
+- **CI:** fixed the type errors from the Better Auth 1.7.10 upgrade. `@better-auth/infra` is now 0.4.20, which is built for Better Auth 1.7 and removes the duplicate `@better-auth/core` copies that broke the `dashClient` and `organization` client types.
+- **Database:** `invitation.created_at` is added (migration `0029`). Better Auth 1.7 checks the schema before each auth request and rejected every request while the column was missing.
+- **Password reset:** reset emails are sent again. The config used `sendResetPasswordEmail`, which isn't a Better Auth option, so every reset request failed with `RESET_PASSWORD_DISABLED`.
+  - Resetting a password signs out all other sessions.
+- **Trusted origins:** `*.vercel.app` is no longer trusted by Better Auth or the proxy. Anyone can deploy there, and it allowed redirects after OAuth sign-in and email verification to any Vercel site. Extra origins go in `BETTER_AUTH_TRUSTED_ORIGINS`.
+- **Rate limiting:** Better Auth's built-in limiter stores its counters in Upstash Redis instead of per-instance memory, so limits hold across serverless instances.
+- **Timing:** verification and reset emails are sent after the response, so response time no longer reveals whether an account exists.
+- **Email verification:** links last 24 hours, as the email says. They expired after 1 hour before.
+- **OAuth errors:** failed social sign-ins return to the sign-in page with a message instead of Better Auth's default error page.
+- **Dependencies:** `bun audit` findings went from 112 (6 critical) to 4 (none critical, none in production code paths). Updated `next` 16.3.8, `undici` 6.28.1, `vitest` 4.1.12, `ai`, `@ai-sdk/google` and transitive packages.
+
 ### GitHub App for the knowledge base
 
 - **Connect GitHub:** a read-only GitHub App replaces pasting a public repository URL. Private repositories work, and the workspace picks repositories from a list.

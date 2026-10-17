@@ -204,6 +204,13 @@
       "when": 1778631660000,
       "tag": "0028_github_app",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1778631720000,
+      "tag": "0029_invitation_created_at",
+      "breakpoints": true
     }
   ]
 }
