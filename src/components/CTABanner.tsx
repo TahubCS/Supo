@@ -20,8 +20,8 @@ export function CTABanner() {
             Ready to get started?
           </h2>
           <p className="mx-auto mb-8 max-w-2xl text-base text-[color:var(--text-secondary)]">
-            Join thousands of teams using Supo to deliver exceptional customer
-            support at scale.
+            Connect your docs, embed the widget with one script tag, and let
+            your team step in whenever a customer needs a person.
           </p>
 
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -31,7 +31,7 @@ export function CTABanner() {
               className="group rounded-lg bg-foreground px-6 py-2.5 text-sm text-background hover:bg-foreground/90"
             >
               <Link href="/sign-up">
-                Start free trial
+                Get started free
                 <ArrowRight className="ml-2 size-4 transition-transform group-hover:translate-x-1" />
               </Link>
             </Button>
@@ -41,12 +41,12 @@ export function CTABanner() {
               size="default"
               className="rounded-lg text-sm text-[color:var(--text-secondary)] hover:bg-card hover:text-foreground"
             >
-              <Link href="/sign-up/team">Contact sales</Link>
+              <Link href="/sign-up/team">Start for your team</Link>
             </Button>
           </div>
 
           <p className="mt-6 text-xs text-[color:var(--text-tertiary)]">
-            No credit card required · 14-day free trial
+            Free during the alpha · No credit card required
           </p>
         </motion.div>
       </div>

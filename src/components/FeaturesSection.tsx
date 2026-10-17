@@ -15,13 +15,13 @@ const features = [
     icon: Brain,
     title: "AI Resolution Engine",
     description:
-      "Advanced language models trained on your knowledge base to resolve customer issues instantly.",
+      "Retrieves the right passages from your knowledge base and answers with citations, in real time.",
   },
   {
     icon: ArrowUpRight,
     title: "Smart Escalation",
     description:
-      "Automatically detects when human intervention is needed and routes to the right team member.",
+      "Hands off when a customer asks for a person, gets frustrated, or the AI keeps missing, with optional round-robin assignment.",
   },
   {
     icon: MessageSquare,
@@ -31,9 +31,9 @@ const features = [
   },
   {
     icon: Inbox,
-    title: "Multi-channel Inbox",
+    title: "Shared Inbox",
     description:
-      "Unified inbox for email, chat, and social media support across all your channels.",
+      "Widget chats and email in one inbox, with assignment, priorities, tags and SLA timers.",
   },
   {
     icon: BarChart3,
