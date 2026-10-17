@@ -4,6 +4,17 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Landing page
+
+- **Accurate claims only:**
+  - Removed the placeholder testimonials, the unused mock-dashboard sections, and the hero's invented metrics (80%, 94% resolution, 99.9% uptime SLA).
+  - Feature copy now matches what Supo does: retrieval with citations, the real handoff triggers, and widget chat plus email instead of "social media".
+- **Pricing:** one free alpha plan listing features that ship today, instead of paid tiers with no billing behind them.
+- **Developers section:** working snippets for the published `@supoapp/widget` package, the script embed, and `/api/v1/knowledge/search`. It replaces examples for a non-existent `api.supo.ai` endpoint and SDKs.
+- **Links:** dead `#` links in the navbar and footer now point to real sections, the API reference, the changelog and the security policy.
+- **Live demo:** with `NEXT_PUBLIC_SUPO_DEMO_PRODUCT_ID` set, the home page loads that product's widget the way customers embed it. The widget is removed when the visitor navigates into the app.
+- **README:** a diagram of the indexing and answering pipeline.
+
 ### Better Auth 1.7 upgrade and auth hardening
 
 - **CI:** fixed the type errors from the Better Auth 1.7.10 upgrade. `@better-auth/infra` is now 0.4.20, which is built for Better Auth 1.7 and removes the duplicate `@better-auth/core` copies that broke the `dashClient` and `organization` client types.

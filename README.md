@@ -16,6 +16,25 @@ Supo is a multi-tenant AI support platform for businesses. It helps teams automa
 - Super-admin visibility across users, workspaces, products, conversations, and knowledge activity.
 - Auth hardening, rate limits, audit logs, and security activity tracking.
 
+## How It Works
+
+```mermaid
+flowchart LR
+  subgraph Ingest["Indexing (background jobs)"]
+    S["Sources: articles, files, websites, GitHub"] --> X["Extract text"] --> C["Chunk by heading"] --> E["Gemini embeddings"] --> DB[("Postgres: pgvector + full-text")]
+  end
+  subgraph Answer["Answering a customer"]
+    Q["Customer message"] --> R["Vector + keyword search, merged with RRF"]
+    DB --> R
+    R --> H{"Handoff needed?"}
+    H -- no --> G["Gemini answer with citations, streamed to the widget"]
+    H -- yes --> I["Shared inbox: agent takes over"]
+    R -. "nothing relevant" .-> K["Missing-knowledge gap for review"]
+  end
+```
+
+A conversation is handed to a person when the customer asks for one, seems frustrated, or the AI repeatedly finds nothing relevant. Unanswered questions become review items, so the knowledge base improves from real conversations.
+
 ## Product Areas
 
 Supo is organized around five product areas:
@@ -195,6 +214,7 @@ Notes:
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
 - The email channel is optional. Set `INBOUND_EMAIL_DOMAIN` (a receiving domain in Resend) and `RESEND_WEBHOOK_SECRET` (the signing secret of a Resend webhook for `email.received` pointed at `/api/inbound/email`).
 - The GitHub App is optional. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM, multi-line or with `\n` escapes) and `GITHUB_APP_WEBHOOK_SECRET`. Configure the app with callback URL `/api/integrations/github/callback` and "Request user authorization (OAuth) during installation" enabled, webhook URL `/api/webhooks/github`, read-only Contents, Metadata and Issues permissions, and the Push, Release, Repository and Issues events. It is separate from the GitHub OAuth app used for sign-in.
+- `NEXT_PUBLIC_SUPO_DEMO_PRODUCT_ID` (optional) shows that product's widget on the landing page as a live demo. It is read at build time.
 - `ABLY_API_KEY` enables realtime inbox/widget updates. The widget keeps polling as a fallback if Ably is absent.
 - `CRON_SECRET` authorizes Vercel Cron and internal job routes. Vercel sends it as `Authorization: Bearer $CRON_SECRET` automatically when the variable is set on the project.
 - `DATABASE_SSL=disable` (or `sslmode=disable` in the URL) turns off TLS for a local Postgres.
@@ -280,6 +300,12 @@ Before deploying:
 4. Set Upstash Redis env vars. Without them rate limiting fails open.
 5. Run migrations against the production database.
 6. Run `bun run lint` and `bun run build`.
+
+To show a live demo on the landing page:
+
+1. Create a product (for example "Supo") in your workspace and add its knowledge sources, such as this repository through the GitHub App.
+2. Under **Widget → Allowed websites**, add the production origin, or leave the list empty.
+3. Set `NEXT_PUBLIC_SUPO_DEMO_PRODUCT_ID` to the product id and redeploy. Per-product quotas cap AI usage from public visitors.
 
 ## Release Guidance
 
