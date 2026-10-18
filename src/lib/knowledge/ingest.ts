@@ -6,9 +6,11 @@ import { safeFetch } from "@/lib/net/safe-fetch";
 
 import { geminiEmbedManyWithModel } from "./ai";
 import { buildEmbeddingText, chunkDocument } from "./chunk";
+import { loadConfluenceDocuments } from "./confluence";
 import { crawlSite } from "./crawl";
 import { extractDocument } from "./extract";
 import { loadGitHubAppDocuments } from "./github";
+import { AUTO_SYNC_SOURCE_TYPES } from "./source-types";
 
 type KnowledgeChunkInsert = typeof knowledgeChunk.$inferInsert;
 type KnowledgeSourceRow = typeof knowledgeSource.$inferSelect;
@@ -143,6 +145,13 @@ export async function loadSourceDocuments(source: KnowledgeSourceRow): Promise<L
       if (!source.url) throw new Error("No repository URL");
       const docs = await fetchGitHubDocuments(source.url);
       return { docs, failedPages: 0, totalPages: docs.length };
+    }
+    case "confluence": {
+      const confluence = source.settings?.confluence;
+      if (!source.atlassianConnectionId || !confluence) throw new Error("No Confluence space selected");
+      const result = await loadConfluenceDocuments(source.atlassianConnectionId, confluence);
+      if (result.docs.length === 0) throw new Error("No pages with text found in this Confluence space");
+      return result;
     }
     case "sitemap":
     case "website": {
@@ -391,7 +400,7 @@ export async function syncSourceIfChanged(
 ): Promise<"skipped" | "reindexed"> {
   const source = await db.query.knowledgeSource.findFirst({ where: eq(knowledgeSource.id, sourceId) });
   if (!source) return "skipped";
-  if (!["url", "github", "sitemap", "website"].includes(source.type)) return "skipped";
+  if (!AUTO_SYNC_SOURCE_TYPES.includes(source.type)) return "skipped";
 
   const loaded = await loadSourceDocuments(source);
   const currentHash = await hashDocuments(loaded.docs);
