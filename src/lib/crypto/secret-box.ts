@@ -13,6 +13,9 @@ const VERSION = "v1";
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 
+/** The value is not one this key sealed for this context (key changed, or the value was altered). */
+export class UnreadableSecretError extends Error {}
+
 export function integrationsEncryptionKey(): Buffer {
   const raw = env.INTEGRATIONS_ENCRYPTION_KEY;
   if (!raw) throw new Error("INTEGRATIONS_ENCRYPTION_KEY is not set");
@@ -34,11 +37,15 @@ export function sealSecret(plaintext: string, context: string, key = integration
 export function openSecret(sealed: string, context: string, key = integrationsEncryptionKey()): string {
   const [version, iv, tag, ciphertext, extra] = sealed.split(".");
   if (version !== VERSION || !iv || !tag || ciphertext === undefined || extra !== undefined) {
-    throw new Error("Unsupported secret format");
+    throw new UnreadableSecretError("Unsupported secret format");
   }
-  // Pinning the tag length rejects truncated tags, which GCM would otherwise accept.
-  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"), { authTagLength: TAG_BYTES });
-  decipher.setAAD(Buffer.from(context, "utf8"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
+  try {
+    // Pinning the tag length rejects truncated tags, which GCM would otherwise accept.
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"), { authTagLength: TAG_BYTES });
+    decipher.setAAD(Buffer.from(context, "utf8"));
+    decipher.setAuthTag(Buffer.from(tag, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(ciphertext, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    throw new UnreadableSecretError("Secret could not be decrypted");
+  }
 }

@@ -51,6 +51,7 @@ function ConnectCard({ title, body, connectUrl, action }: { title: string; body:
 
 export function ConfluenceSourceForm({ productId, onAdded }: { productId: string; onAdded: () => void }) {
   const [connection, setConnection] = useState<ConfluenceConnection | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [cloudId, setCloudId] = useState<string | null>(null);
   // Spaces of the site they were loaded for; a stale list never shows for another site.
   const [loaded, setLoaded] = useState<{ cloudId: string; spaces: ConfluenceSpaceOption[] } | null>(null);
@@ -70,7 +71,7 @@ export function ConfluenceSourceForm({ productId, onAdded }: { productId: string
         setCloudId(next.sites[0]?.cloudId ?? null);
       })
       .catch((error: unknown) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : "Could not load Confluence");
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : "Could not load Confluence");
       });
     return () => {
       cancelled = true;
@@ -128,6 +129,7 @@ export function ConfluenceSourceForm({ productId, onAdded }: { productId: string
     });
   }
 
+  if (loadError) return <p className="text-xs text-[color:var(--status-error)]">{loadError}</p>;
   if (!connection) return <p className={hintClass}>Loading Confluence…</p>;
 
   if (!connection.configured || !connection.connectUrl) {

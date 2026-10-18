@@ -140,6 +140,34 @@ describe.skipIf(!DATABASE_URL)("Atlassian connection tokens (database)", () => {
     expect(refresh.spent).toEqual(["refresh-1"]);
   });
 
+  it("asks for a reconnect when the stored tokens can't be decrypted", async () => {
+    const { id } = await connect();
+    const original = process.env.INTEGRATIONS_ENCRYPTION_KEY;
+    // The key was changed, so nothing sealed with the old one opens.
+    process.env.INTEGRATIONS_ENCRYPTION_KEY = randomBytes(32).toString("base64");
+    try {
+      await expect(mod.connection.getAccessToken(id)).rejects.toBeInstanceOf(mod.connection.AtlassianReauthRequiredError);
+      expect((await storedRow(id))?.status).toBe("reauth_required");
+      expect(refresh.spent).toEqual([]);
+    } finally {
+      process.env.INTEGRATIONS_ENCRYPTION_KEY = original;
+    }
+  });
+
+  it("refreshes when only the access token can't be decrypted", async () => {
+    const { eq } = await import("drizzle-orm");
+    const { id } = await connect();
+    await mod.db
+      .update(mod.schema.atlassianConnection)
+      .set({ accessToken: "v1.altered.value.x" })
+      .where(eq(mod.schema.atlassianConnection.id, id));
+    refresh.respond = async () => issued(2);
+
+    await expect(mod.connection.getAccessToken(id)).resolves.toBe("access-2");
+    expect(refresh.spent).toEqual(["refresh-1"]);
+    expect((await storedRow(id))?.status).toBe("active");
+  });
+
   it("keeps the connection usable when a refresh fails for another reason", async () => {
     const { id } = await connect({ expiresAt: new Date(Date.now() - 1000) });
     refresh.respond = async () => oauthError(503, "temporarily_unavailable");

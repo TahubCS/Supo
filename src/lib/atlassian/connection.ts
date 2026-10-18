@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "@/db";
 import { atlassianConnection } from "@/db/schema";
-import { openSecret, sealSecret } from "@/lib/crypto/secret-box";
+import { openSecret, sealSecret, UnreadableSecretError } from "@/lib/crypto/secret-box";
 
 import {
   ATLASSIAN_API,
@@ -43,6 +43,19 @@ function sealedTokens(organizationId: string, tokens: AtlassianTokens) {
   };
 }
 
+/**
+ * A stored token, or null when it can't be decrypted: INTEGRATIONS_ENCRYPTION_KEY
+ * changed, or the value was altered. Either way only a new grant helps.
+ */
+function unsealToken(row: AtlassianConnection, kind: "access" | "refresh"): string | null {
+  try {
+    return openSecret(kind === "access" ? row.accessToken : row.refreshToken, tokenContext(row.organizationId, kind));
+  } catch (error) {
+    if (error instanceof UnreadableSecretError) return null;
+    throw error;
+  }
+}
+
 /** Stores a new grant for the workspace, replacing any previous one. */
 export async function saveAtlassianConnection(
   organizationId: string,
@@ -73,13 +86,15 @@ export async function deleteAtlassianConnection(organizationId: string): Promise
  * is set after a 401). Atlassian invalidates the old refresh token on every
  * refresh, so the refresh runs under a row lock: concurrent callers wait and
  * reuse the token the first one stored instead of spending the same refresh
- * token twice.
+ * token twice. A revoked or unreadable grant is marked reauth_required.
  */
 export async function getAccessToken(connectionId: string, { force = false } = {}): Promise<string> {
   const current = await db.query.atlassianConnection.findFirst({ where: eq(atlassianConnection.id, connectionId) });
   if (!current || current.status !== "active") throw new AtlassianReauthRequiredError();
   if (!force && current.expiresAt.getTime() - Date.now() > EXPIRY_SKEW_MS) {
-    return openSecret(current.accessToken, tokenContext(current.organizationId, "access"));
+    const token = unsealToken(current, "access");
+    // An unreadable access token falls through to a refresh.
+    if (token !== null) return token;
   }
 
   const outcome = await db.transaction(async (tx): Promise<{ token: string } | { reauth: true }> => {
@@ -90,24 +105,28 @@ export async function getAccessToken(connectionId: string, { force = false } = {
       .for("update");
     if (!locked || locked.status !== "active") return { reauth: true };
 
+    const requireReauth = async () => {
+      await tx
+        .update(atlassianConnection)
+        .set({ status: "reauth_required", updatedAt: new Date() })
+        .where(eq(atlassianConnection.id, connectionId));
+      return { reauth: true as const };
+    };
+
     // Another request refreshed while this one waited for the lock.
     if (locked.accessToken !== current.accessToken) {
-      return { token: openSecret(locked.accessToken, tokenContext(locked.organizationId, "access")) };
+      const token = unsealToken(locked, "access");
+      return token === null ? requireReauth() : { token };
     }
+
+    const refreshToken = unsealToken(locked, "refresh");
+    if (refreshToken === null) return requireReauth();
 
     let tokens: AtlassianTokens;
     try {
-      tokens = await refreshAtlassianTokens(
-        openSecret(locked.refreshToken, tokenContext(locked.organizationId, "refresh")),
-      );
+      tokens = await refreshAtlassianTokens(refreshToken);
     } catch (error) {
-      if (error instanceof AtlassianApiError && error.code === "invalid_grant") {
-        await tx
-          .update(atlassianConnection)
-          .set({ status: "reauth_required", updatedAt: new Date() })
-          .where(eq(atlassianConnection.id, connectionId));
-        return { reauth: true };
-      }
+      if (error instanceof AtlassianApiError && error.code === "invalid_grant") return requireReauth();
       throw error;
     }
 

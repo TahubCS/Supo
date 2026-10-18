@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { integrationsEncryptionKey, openSecret, sealSecret } from "@/lib/crypto/secret-box";
+import { integrationsEncryptionKey, openSecret, sealSecret, UnreadableSecretError } from "@/lib/crypto/secret-box";
 
 const key = randomBytes(32);
 
@@ -28,25 +28,26 @@ describe("sealSecret / openSecret", () => {
 
   it("rejects the wrong key or the wrong context", () => {
     const sealed = sealSecret("secret", "atlassian:refresh", key);
-    expect(() => openSecret(sealed, "atlassian:refresh", randomBytes(32))).toThrow();
-    expect(() => openSecret(sealed, "atlassian:access", key)).toThrow();
+    expect(() => openSecret(sealed, "atlassian:refresh", randomBytes(32))).toThrow(UnreadableSecretError);
+    expect(() => openSecret(sealed, "atlassian:access", key)).toThrow(UnreadableSecretError);
   });
 
   it("rejects a tampered IV, tag or ciphertext", () => {
     const sealed = sealSecret("secret", "ctx", key);
     for (const index of [1, 2, 3]) {
-      expect(() => openSecret(tamper(sealed, index), "ctx", key)).toThrow();
+      expect(() => openSecret(tamper(sealed, index), "ctx", key)).toThrow(UnreadableSecretError);
     }
   });
 
   it("rejects a truncated authentication tag", () => {
     const parts = sealSecret("secret", "ctx", key).split(".");
     parts[2] = Buffer.from(parts[2], "base64url").subarray(0, 4).toString("base64url");
-    expect(() => openSecret(parts.join("."), "ctx", key)).toThrow();
+    expect(() => openSecret(parts.join("."), "ctx", key)).toThrow(UnreadableSecretError);
   });
 
   it("rejects malformed values", () => {
     const sealed = sealSecret("secret", "ctx", key);
+    expect(() => openSecret(sealed.replace(/^v1/, "v2"), "ctx", key)).toThrow(UnreadableSecretError);
     expect(() => openSecret(sealed.replace(/^v1/, "v2"), "ctx", key)).toThrow("Unsupported secret format");
     expect(() => openSecret("v1.abc", "ctx", key)).toThrow("Unsupported secret format");
     expect(() => openSecret(`${sealed}.extra`, "ctx", key)).toThrow("Unsupported secret format");
@@ -69,6 +70,8 @@ describe("integrationsEncryptionKey", () => {
   it("refuses a missing or wrongly sized key", () => {
     delete process.env.INTEGRATIONS_ENCRYPTION_KEY;
     expect(() => integrationsEncryptionKey()).toThrow("not set");
+    // A configuration error, not an unreadable value: it must not cost workspaces their grants.
+    expect(() => openSecret(sealSecret("secret", "ctx", key), "ctx")).toThrow("INTEGRATIONS_ENCRYPTION_KEY is not set");
     process.env.INTEGRATIONS_ENCRYPTION_KEY = randomBytes(16).toString("base64");
     expect(() => integrationsEncryptionKey()).toThrow("32 bytes");
   });

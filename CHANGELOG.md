@@ -18,7 +18,7 @@ All notable changes to Supo will be documented in this file.
 - **Tokens:**
   - Stored encrypted with AES-256-GCM under a new `INTEGRATIONS_ENCRYPTION_KEY`.
   - Refreshed under a row lock, since Atlassian invalidates the old refresh token on every refresh.
-  - A revoked grant marks the connection for reconnecting. Its sources keep serving their last index and show a reconnect message.
+  - A revoked grant, or tokens that no longer decrypt (for example after changing `INTEGRATIONS_ENCRYPTION_KEY`), marks the connection for reconnecting. Its sources keep serving their last index and show a reconnect message.
 - **Disconnect:** workspace owners and admins can remove the grant, which removes every Confluence source in the workspace.
 - **Database:** `atlassian_connection` table and `knowledge_source.atlassian_connection_id` (migration `0030`).
 - **Internal:** the connect `state` helper moved from `src/lib/github/state.ts` to `src/lib/connect-state.ts` and now covers both providers. GitHub states keep their existing signature.
