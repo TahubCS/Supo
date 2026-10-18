@@ -527,7 +527,7 @@ export const knowledgeSource = pgTable("knowledge_source", {
   productId: text("product_id")
     .notNull()
     .references(() => product.id, { onDelete: "cascade" }),
-  type: text("type").notNull(), // "article" | "url" | "website" | "github" | "conversation" | "sitemap"
+  type: text("type").notNull(), // "article" | "url" | "website" | "github" | "confluence" | "conversation" | "sitemap"
   name: text("name").notNull(),
   url: text("url"),
   content: text("content"),
@@ -548,12 +548,20 @@ export const knowledgeSource = pgTable("knowledge_source", {
   // GitHub sources connected through the GitHub App (null for public-URL sources).
   githubInstallationId: bigint("github_installation_id", { mode: "number" }),
   githubRepoId: bigint("github_repo_id", { mode: "number" }),
+  // Confluence sources read through the workspace's Atlassian connection;
+  // disconnecting removes them.
+  atlassianConnectionId: text("atlassian_connection_id").references(() => atlassianConnection.id, {
+    onDelete: "cascade",
+  }),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
 }, (table) => [
   index("knowledge_source_github_repo_idx")
     .on(table.githubRepoId)
     .where(sql`${table.githubRepoId} IS NOT NULL`),
+  index("knowledge_source_atlassian_connection_idx")
+    .on(table.atlassianConnectionId)
+    .where(sql`${table.atlassianConnectionId} IS NOT NULL`),
 ]);
 
 export type GitHubSourceSettings = {
@@ -571,7 +579,21 @@ export type GitHubSourceSettings = {
   lastCommitSha?: string | null;
 };
 
-export type KnowledgeSourceSettings = { maxPages?: number; github?: GitHubSourceSettings };
+export type ConfluenceSourceSettings = {
+  // The Atlassian site (cloud id) and space this source reads.
+  cloudId: string;
+  siteUrl: string;
+  siteName: string;
+  spaceId: string;
+  spaceKey: string;
+  spaceName: string;
+};
+
+export type KnowledgeSourceSettings = {
+  maxPages?: number;
+  github?: GitHubSourceSettings;
+  confluence?: ConfluenceSourceSettings;
+};
 
 // GitHub App installations linked to a workspace. One installation can be
 // linked to several workspaces (each verified through the installing user).
@@ -596,6 +618,30 @@ export const githubInstallation = pgTable(
     uniqueIndex("github_installation_org_installation_idx").on(table.organizationId, table.installationId),
     index("github_installation_installation_idx").on(table.installationId),
   ],
+);
+
+// The workspace's Atlassian OAuth grant. One grant can reach several sites, and
+// Atlassian rotates its refresh token on every refresh, so the tokens live in a
+// single row per workspace; each Confluence source records its own site and
+// space. Tokens are sealed with src/lib/crypto/secret-box.ts.
+export const atlassianConnection = pgTable(
+  "atlassian_connection",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    scopes: text("scopes").notNull(),
+    // "active" | "reauth_required" (the refresh token was revoked or expired).
+    status: text("status").notNull().default("active"),
+    createdById: text("created_by_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("atlassian_connection_org_idx").on(table.organizationId)],
 );
 
 export const knowledgeSourceRelations = relations(knowledgeSource, ({ one, many }) => ({
