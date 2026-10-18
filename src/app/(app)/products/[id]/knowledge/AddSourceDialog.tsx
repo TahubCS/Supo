@@ -53,8 +53,9 @@ export function AddSourceDialog({ productId }: { productId: string }) {
   useEffect(() => {
     if (!githubResult) return;
     const result = GITHUB_RESULTS[githubResult];
-    if (result?.ok) toast.success(result.message);
-    else if (result) toast.error(result.message);
+    // A fixed id keeps a re-run effect (React StrictMode) from stacking duplicates.
+    if (result?.ok) toast.success(result.message, { id: "connect-result" });
+    else if (result) toast.error(result.message, { id: "connect-result" });
     router.replace(pathname);
   }, [githubResult, pathname, router]);
   const [name, setName] = useState("");
