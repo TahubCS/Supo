@@ -13,20 +13,34 @@ import { Textarea } from "@/components/ui/textarea";
 import type { AddSourceInput } from "@/lib/knowledge/sources";
 
 import { addSource, uploadSourceFile } from "./actions";
+import { ConfluenceSourceForm } from "./ConfluenceSourceForm";
 import { GitHubSourceForm } from "./GitHubSourceForm";
 
-// Results of the GitHub App connect round trip (see /api/integrations/github/callback).
-const GITHUB_RESULTS: Record<string, { ok: boolean; message: string }> = {
-  connected: { ok: true, message: "GitHub connected — choose a repository to add" },
-  cancelled: { ok: false, message: "GitHub authorization was cancelled" },
-  unauthorized: { ok: false, message: "Your GitHub account can't access that installation" },
-  "no-installations": { ok: false, message: "Install the GitHub App first, then try again" },
-  "not-configured": { ok: false, message: "The GitHub App is not configured on this server" },
-  error: { ok: false, message: "Could not connect GitHub. Please try again." },
+type ConnectResult = { ok: boolean; message: string };
+
+// Results of the connect round trips (see /api/integrations/*/callback),
+// keyed by query parameter.
+const CONNECT_RESULTS: Record<"github" | "atlassian", Record<string, ConnectResult>> = {
+  github: {
+    connected: { ok: true, message: "GitHub connected — choose a repository to add" },
+    cancelled: { ok: false, message: "GitHub authorization was cancelled" },
+    unauthorized: { ok: false, message: "Your GitHub account can't access that installation" },
+    "no-installations": { ok: false, message: "Install the GitHub App first, then try again" },
+    "not-configured": { ok: false, message: "The GitHub App is not configured on this server" },
+    error: { ok: false, message: "Could not connect GitHub. Please try again." },
+  },
+  atlassian: {
+    connected: { ok: true, message: "Confluence connected — choose a space to add" },
+    cancelled: { ok: false, message: "Confluence authorization was cancelled" },
+    "no-sites": { ok: false, message: "That Atlassian account can't read Confluence on any site" },
+    "not-configured": { ok: false, message: "Confluence is not configured on this server" },
+    error: { ok: false, message: "Could not connect Confluence. Please try again." },
+  },
 };
 
-// "file" is parsed server-side and stored as an article source.
-type SourceType = AddSourceInput["type"] | "file";
+// "file" is parsed server-side and stored as an article source; GitHub and
+// Confluence have their own forms.
+type SourceType = AddSourceInput["type"] | "file" | "confluence";
 
 const SOURCE_TYPES: { id: SourceType; label: string }[] = [
   { id: "article", label: "Article" },
@@ -34,6 +48,7 @@ const SOURCE_TYPES: { id: SourceType; label: string }[] = [
   { id: "website", label: "Website" },
   { id: "url", label: "Single page" },
   { id: "github", label: "GitHub" },
+  { id: "confluence", label: "Confluence" },
 ];
 
 const segmentBase = "flex-1 py-1.5 text-xs font-medium transition-colors duration-150";
@@ -45,19 +60,28 @@ export function AddSourceDialog({ productId }: { productId: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const githubResult = searchParams.get("github");
-  // Back from GitHub: reopen the dialog on the GitHub tab to pick a repository.
-  const [returnedFromGitHub] = useState(() => githubResult === "connected" || githubResult === "no-installations");
-  const [open, setOpen] = useState(returnedFromGitHub);
-  const [type, setType] = useState<SourceType>(returnedFromGitHub ? "github" : "article");
+  const atlassianResult = searchParams.get("atlassian");
+  // Back from a connect round trip: reopen the dialog on that tab to pick what to add.
+  const [returnedTo] = useState<SourceType | null>(() =>
+    githubResult === "connected" || githubResult === "no-installations"
+      ? "github"
+      : atlassianResult === "connected"
+        ? "confluence"
+        : null,
+  );
+  const [open, setOpen] = useState(returnedTo !== null);
+  const [type, setType] = useState<SourceType>(returnedTo ?? "article");
 
   useEffect(() => {
-    if (!githubResult) return;
-    const result = GITHUB_RESULTS[githubResult];
+    if (!githubResult && !atlassianResult) return;
+    const result =
+      (githubResult && CONNECT_RESULTS.github[githubResult]) ||
+      (atlassianResult && CONNECT_RESULTS.atlassian[atlassianResult]);
     // A fixed id keeps a re-run effect (React StrictMode) from stacking duplicates.
-    if (result?.ok) toast.success(result.message, { id: "connect-result" });
+    if (result && result.ok) toast.success(result.message, { id: "connect-result" });
     else if (result) toast.error(result.message, { id: "connect-result" });
     router.replace(pathname);
-  }, [githubResult, pathname, router]);
+  }, [githubResult, atlassianResult, pathname, router]);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
@@ -75,6 +99,12 @@ export function AddSourceDialog({ productId }: { productId: string }) {
   }
 
   const needsUrl = type === "website" || type === "url";
+
+  function onAdded() {
+    setOpen(false);
+    reset();
+    router.refresh();
+  }
 
   function handleUpload() {
     if (!file) return;
@@ -99,7 +129,8 @@ export function AddSourceDialog({ productId }: { productId: string }) {
       handleUpload();
       return;
     }
-    if (!name.trim()) return;
+    // GitHub and Confluence submit from their own forms.
+    if (!name.trim() || type === "confluence") return;
     const input: AddSourceInput = {
       type,
       name: name.trim(),
@@ -149,14 +180,9 @@ export function AddSourceDialog({ productId }: { productId: string }) {
           </div>
 
           {type === "github" ? (
-            <GitHubSourceForm
-              productId={productId}
-              onAdded={() => {
-                setOpen(false);
-                reset();
-                router.refresh();
-              }}
-            />
+            <GitHubSourceForm productId={productId} onAdded={onAdded} />
+          ) : type === "confluence" ? (
+            <ConfluenceSourceForm productId={productId} onAdded={onAdded} />
           ) : (
             <>
               <div className="space-y-1.5">

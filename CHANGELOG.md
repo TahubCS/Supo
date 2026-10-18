@@ -4,6 +4,27 @@ All notable changes to Supo will be documented in this file.
 
 ## Unreleased
 
+### Confluence knowledge source
+
+- **Connect Confluence:** a workspace grants read-only access through Atlassian OAuth 2.0, then adds spaces from a list in the knowledge base (new Confluence tab).
+  - The connect `state` is signed, expires after 30 minutes, and is bound to the Supo user and to Atlassian. A GitHub state is not accepted.
+  - A grant is stored only if it can read Confluence on at least one site.
+  - Site and space details are read from Atlassian, never taken from the browser.
+- **Indexing:**
+  - Every current page of a space is indexed, up to 400, most recently edited first; a warning says when a space has more.
+  - Storage-format markup is converted to text: code blocks, expand titles, tasks and page links. Template placeholders and duplicate editor fallbacks are dropped.
+  - Pages re-sync daily, and only pages whose version changed are re-embedded.
+- **Citations never link to Confluence:** answers name the page, since customers can't open it.
+- **Tokens:**
+  - Stored encrypted with AES-256-GCM under a new `INTEGRATIONS_ENCRYPTION_KEY`.
+  - Refreshed under a row lock, since Atlassian invalidates the old refresh token on every refresh.
+  - A revoked grant marks the connection for reconnecting. Its sources keep serving their last index and show a reconnect message.
+- **Disconnect:** workspace owners and admins can remove the grant, which removes every Confluence source in the workspace.
+- **Database:** `atlassian_connection` table and `knowledge_source.atlassian_connection_id` (migration `0030`).
+- **Internal:** the connect `state` helper moved from `src/lib/github/state.ts` to `src/lib/connect-state.ts` and now covers both providers. GitHub states keep their existing signature.
+- **Nightly sync:** the list of auto-synced source types lives in one place (`src/lib/knowledge/source-types.ts`) instead of three.
+- **Fix: connect result messages:** the toast shown after returning from GitHub (and now Atlassian) appears again. It was raised before the root layout's toast container subscribed, and sonner drops toasts nobody is listening for.
+
 ### Widget SDK 0.1.0-alpha.11
 
 - **Default `apiBaseUrl`:** `@supoapp/widget` falls back to the production origin (`https://supo.muhammadtahubkhatri.dev`) instead of `https://app.supo.com`, and npm entry points no longer derive it from `document.currentScript`. A test keeps the SDK default equal to `PRODUCTION_ORIGIN`. See `packages/widget/CHANGELOG.md`.
