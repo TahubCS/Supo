@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { recordProductAudit } from "@/lib/audit";
 import { exchangeOAuthCode, isGitHubAppConfigured, listUserInstallations } from "@/lib/github/app";
 import { linkInstallations } from "@/lib/github/installations";
-import { verifyConnectState } from "@/lib/github/state";
+import { verifyConnectState } from "@/lib/connect-state";
 import { getProductAccess, canAccessProductCapability } from "@/lib/product-access";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   // Changes made from GitHub's settings page come back without our state.
   if (!state) return redirect("/dashboard");
 
-  const parsed = verifyConnectState(state);
+  const parsed = verifyConnectState("github", state);
   if (!parsed) return redirect("/dashboard?github=expired");
 
   const knowledgePath = `/products/${encodeURIComponent(parsed.productId)}/knowledge`;

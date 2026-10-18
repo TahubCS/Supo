@@ -25,7 +25,7 @@ import {
   listInstallationRepositories,
 } from "@/lib/github/app";
 import { findActiveInstallation, listLinkedInstallations, unlinkInstallation } from "@/lib/github/installations";
-import { createConnectState } from "@/lib/github/state";
+import { createConnectState } from "@/lib/connect-state";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
 import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 import { recordProductAudit } from "@/lib/audit";
@@ -196,8 +196,8 @@ export async function getGitHubConnection(productId: string): Promise<GitHubConn
   const installations = await listLinkedInstallations(access.product.organizationId);
   return {
     configured: true,
-    installUrl: githubInstallUrl(createConnectState(productId, access.session.user.id)),
-    authorizeUrl: githubAuthorizeUrl(createConnectState(productId, access.session.user.id)),
+    installUrl: githubInstallUrl(createConnectState("github", productId, access.session.user.id)),
+    authorizeUrl: githubAuthorizeUrl(createConnectState("github", productId, access.session.user.id)),
     installations: installations.map((installation) => ({
       installationId: installation.installationId,
       accountLogin: installation.accountLogin,
