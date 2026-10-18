@@ -97,4 +97,16 @@ export const env = {
   get GITHUB_APP_WEBHOOK_SECRET() {
     return optionalEnv("GITHUB_APP_WEBHOOK_SECRET");
   },
+  // Atlassian OAuth 2.0 (3LO) app used to connect Confluence to the knowledge base.
+  get ATLASSIAN_CLIENT_ID() {
+    return optionalEnv("ATLASSIAN_CLIENT_ID");
+  },
+  get ATLASSIAN_CLIENT_SECRET() {
+    return optionalEnv("ATLASSIAN_CLIENT_SECRET");
+  },
+  // 32 random bytes, base64. Encrypts third-party OAuth tokens at rest; kept
+  // separate from BETTER_AUTH_SECRET so either can rotate on its own.
+  get INTEGRATIONS_ENCRYPTION_KEY() {
+    return optionalEnv("INTEGRATIONS_ENCRYPTION_KEY");
+  },
 };

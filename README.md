@@ -91,9 +91,11 @@ drizzle/                           SQL migrations
 
 ## Knowledge Base
 
-**Sources:** articles (markdown), single pages, whole websites (crawled via `robots.txt` / `sitemap.xml`, sitemap indexes, or by following links under the start URL; up to 200 pages), GitHub repositories, and approved answers learned from conversations. URL, website and GitHub sources re-sync daily and are only re-embedded when their content changes; unchanged pages and files reuse their stored embeddings.
+**Sources:** articles (markdown), single pages, whole websites (crawled via `robots.txt` / `sitemap.xml`, sitemap indexes, or by following links under the start URL; up to 200 pages), GitHub repositories, Confluence spaces, and approved answers learned from conversations. URL, website, GitHub and Confluence sources re-sync daily and are only re-embedded when their content changes; unchanged pages and files reuse their stored embeddings.
 
 **GitHub App:** repositories connected through the Supo GitHub App (read-only, private repositories included) index README, changelog and documentation files anywhere in the repository (Markdown, MDX, reStructuredText, AsciiDoc), plus release notes and optionally recent issues. Source code, tests and dependencies are skipped. Pushes to the tracked branch, releases and issue changes re-index through the GitHub webhook, and only changed files are re-embedded. Answers from private repositories never link customers to the files. Public repositories can still be added by URL without the app.
+
+**Confluence:** a workspace connects Atlassian once (OAuth 2.0, read-only page and space scopes), then adds spaces from a list. Every current page in a space is indexed (up to 400, most recently edited first), with Confluence markup such as code blocks, expand titles, tasks and page links converted to text. Pages are re-synced daily and only edited pages are re-embedded. Citations show page titles but never link to Confluence, because customers can't open those pages. Tokens are stored encrypted, and refreshes are serialized per workspace because Atlassian rotates the refresh token on every use. If access is revoked, sources keep serving their last index and show a reconnect message. Disconnecting (workspace owners and admins) removes every Confluence source in the workspace.
 
 **Pipeline** (`src/lib/knowledge/*`):
 
@@ -176,6 +178,7 @@ Supo currently includes early-stage SaaS hardening:
 - Admin can view/revoke sessions and ban/unban users.
 - Public auth and all widget endpoints (including `/api/widget/*` aliases) are rate limited through Upstash Redis. Better Auth's built-in limiter keeps its counters in the same Redis.
 - Products can restrict the widget to an allow-list of website origins (Widget → Allowed websites).
+- Integration tokens (Atlassian) are encrypted at rest with AES-256-GCM under `INTEGRATIONS_ENCRYPTION_KEY`, bound to their workspace and purpose.
 - Realtime tokens are scoped to a single product; agents cannot subscribe to other products' conversations or publish inbox events.
 - Internal and cron routes use a dedicated `CRON_SECRET` with constant-time comparison.
 - Public widget conversation reads/subscriptions require `conversationId + conversationToken`.
@@ -197,6 +200,7 @@ Paid WAF, CAPTCHA, bot-management products, and domain-based email hardening are
 - Google OAuth app
 - GitHub OAuth app (sign-in)
 - GitHub App (optional, connects repositories to the knowledge base)
+- Atlassian OAuth 2.0 app (optional, connects Confluence spaces to the knowledge base)
 - Google Gemini API key
 - Resend API key
 - Ably API key for realtime features
@@ -214,6 +218,7 @@ Notes:
 - Upstash Redis is required in production. Local development fails open when Redis env vars are absent.
 - The email channel is optional. Set `INBOUND_EMAIL_DOMAIN` (a receiving domain in Resend) and `RESEND_WEBHOOK_SECRET` (the signing secret of a Resend webhook for `email.received` pointed at `/api/inbound/email`).
 - The GitHub App is optional. Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_PRIVATE_KEY` (the PEM, multi-line or with `\n` escapes) and `GITHUB_APP_WEBHOOK_SECRET`. Configure the app with callback URL `/api/integrations/github/callback` and "Request user authorization (OAuth) during installation" enabled, webhook URL `/api/webhooks/github`, read-only Contents, Metadata and Issues permissions, and the Push, Release, Repository and Issues events. It is separate from the GitHub OAuth app used for sign-in.
+- Confluence is optional. Create an OAuth 2.0 (3LO) integration in the Atlassian developer console with the Confluence scopes `read:space:confluence` and `read:page:confluence` and callback URL `/api/integrations/atlassian/callback`. Set `ATLASSIAN_CLIENT_ID`, `ATLASSIAN_CLIENT_SECRET` and `INTEGRATIONS_ENCRYPTION_KEY` (`openssl rand -base64 32`). Keep the key stable: changing it makes stored tokens unreadable, and each workspace has to reconnect.
 - `NEXT_PUBLIC_SUPO_DEMO_PRODUCT_ID` (optional) shows that product's widget on the landing page as a live demo. It is read at build time.
 - `ABLY_API_KEY` enables realtime inbox/widget updates. The widget keeps polling as a fallback if Ably is absent.
 - `CRON_SECRET` authorizes Vercel Cron and internal job routes. Vercel sends it as `Authorization: Bearer $CRON_SECRET` automatically when the variable is set on the project.
@@ -272,6 +277,7 @@ Current core tables include:
 - Organization plugin: `organization`, `member`, `invitation`
 - Supo app data: `product`, `widget_config`, `customer`, `conversation`, `message`
 - Knowledge: `knowledge_source`, `knowledge_suggestion`, `knowledge_chunk`
+- Integrations: `github_installation`, `atlassian_connection`
 - Admin/security: `admin_audit_log`, `security_event`
 
 Migrations from `0017` onward are hand-written, idempotent SQL registered in `drizzle/meta/_journal.json` (the Drizzle snapshots for 0012–0016 are missing, so do not rely on `db:generate` until a fresh baseline snapshot is created).

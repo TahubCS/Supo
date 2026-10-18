@@ -28,8 +28,11 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          {/* Before the page: effects run in tree order, and the Toaster must
+              subscribe before a page effect raises a toast on load (sonner
+              drops toasts raised while no Toaster is listening). */}
           <Toaster />
+          {children}
         </ThemeProvider>
       </body>
     </html>

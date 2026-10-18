@@ -211,6 +211,13 @@
       "when": 1778631720000,
       "tag": "0029_invitation_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1778631780000,
+      "tag": "0030_atlassian_connection",
+      "breakpoints": true
     }
   ]
 }

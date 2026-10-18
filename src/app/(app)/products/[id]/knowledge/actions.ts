@@ -25,11 +25,23 @@ import {
   listInstallationRepositories,
 } from "@/lib/github/app";
 import { findActiveInstallation, listLinkedInstallations, unlinkInstallation } from "@/lib/github/installations";
-import { createConnectState } from "@/lib/github/state";
+import {
+  getConfluenceSpace,
+  listConfluenceSites,
+  listConfluenceSpaces,
+  type ConfluenceSpace,
+} from "@/lib/atlassian/confluence";
+import {
+  AtlassianReauthRequiredError,
+  deleteAtlassianConnection,
+  findAtlassianConnection,
+} from "@/lib/atlassian/connection";
+import { AtlassianApiError, atlassianAuthorizeUrl, isAtlassianConfigured, type AtlassianSite } from "@/lib/atlassian/oauth";
+import { createConnectState } from "@/lib/connect-state";
 import { buildSupportSystemPrompt } from "@/lib/knowledge/prompt";
 import { citationsFor, retrieveKnowledge } from "@/lib/knowledge/retrieve";
 import { recordProductAudit } from "@/lib/audit";
-import { requireProductAccess } from "@/lib/product-access";
+import { isWorkspaceOwnerRole, requireProductAccess } from "@/lib/product-access";
 import { requireSecurityQuota } from "@/lib/security";
 
 async function verifyProductAccess(productId: string) {
@@ -143,6 +155,14 @@ export type UpdateSourceInput = {
 
 export async function updateSource(sourceId: string, input: UpdateSourceInput): Promise<void> {
   const source = await verifySourceAccess(sourceId);
+  // A Confluence source is its space; only the display name can change.
+  if (source.type === "confluence") {
+    const name = (input.name ?? source.name).trim().slice(0, MAX_NAME_LENGTH);
+    if (!name) throw new Error("Name is required");
+    await db.update(knowledgeSource).set({ name, updatedAt: new Date() }).where(eq(knowledgeSource.id, sourceId));
+    await auditKnowledge(source.productId, "knowledge.source_updated", sourceId, { name, contentChanged: false });
+    return;
+  }
   // Repositories connected through the GitHub App are identified by ID, not URL.
   if (source.githubRepoId) input = { ...input, url: undefined };
   const type = (source.type === "sitemap" ? "website" : source.type) as AddSourceInput["type"] | "conversation";
@@ -196,8 +216,8 @@ export async function getGitHubConnection(productId: string): Promise<GitHubConn
   const installations = await listLinkedInstallations(access.product.organizationId);
   return {
     configured: true,
-    installUrl: githubInstallUrl(createConnectState(productId, access.session.user.id)),
-    authorizeUrl: githubAuthorizeUrl(createConnectState(productId, access.session.user.id)),
+    installUrl: githubInstallUrl(createConnectState("github", productId, access.session.user.id)),
+    authorizeUrl: githubAuthorizeUrl(createConnectState("github", productId, access.session.user.id)),
     installations: installations.map((installation) => ({
       installationId: installation.installationId,
       accountLogin: installation.accountLogin,
@@ -326,6 +346,158 @@ export async function addGitHubSource(productId: string, input: AddGitHubSourceI
     repository: repo.fullName,
   });
   return sourceId;
+}
+
+// ---------------------------------------------------------------------------
+// Confluence (Atlassian OAuth)
+// ---------------------------------------------------------------------------
+
+export type ConfluenceConnection = {
+  configured: boolean;
+  connectUrl: string | null;
+  status: "disconnected" | "active" | "reauth_required";
+  sites: AtlassianSite[];
+  // Disconnecting removes Confluence sources from every product in the workspace.
+  canDisconnect: boolean;
+};
+
+function isWorkspaceAdmin(role: string): boolean {
+  return isWorkspaceOwnerRole(role) || role === "admin";
+}
+
+export async function getConfluenceConnection(productId: string): Promise<ConfluenceConnection> {
+  const access = await verifyProductAccess(productId);
+  const canDisconnect = isWorkspaceAdmin(access.membership.role);
+  if (!isAtlassianConfigured()) {
+    return { configured: false, connectUrl: null, status: "disconnected", sites: [], canDisconnect };
+  }
+
+  const connectUrl = atlassianAuthorizeUrl(createConnectState("atlassian", productId, access.session.user.id));
+  const connection = await findAtlassianConnection(access.product.organizationId);
+  if (!connection) return { configured: true, connectUrl, status: "disconnected", sites: [], canDisconnect };
+  try {
+    const sites = await listConfluenceSites(connection.id);
+    return { configured: true, connectUrl, status: "active", sites, canDisconnect };
+  } catch (error) {
+    if (error instanceof AtlassianReauthRequiredError) {
+      return { configured: true, connectUrl, status: "reauth_required", sites: [], canDisconnect };
+    }
+    throw error;
+  }
+}
+
+async function requireConfluenceConnection(organizationId: string) {
+  const connection = await findAtlassianConnection(organizationId);
+  if (!connection) throw new Error("Connect Confluence first");
+  return connection;
+}
+
+export type ConfluenceSpaceOption = ConfluenceSpace & { alreadyAdded: boolean };
+
+export async function listConfluenceSpaceOptions(productId: string, cloudId: string): Promise<ConfluenceSpaceOption[]> {
+  const access = await verifyProductAccess(productId);
+  const connection = await requireConfluenceConnection(access.product.organizationId);
+  const spaces = await listConfluenceSpaces(connection.id, cloudId);
+
+  const existing = await db.query.knowledgeSource.findMany({
+    where: and(
+      eq(knowledgeSource.productId, productId),
+      eq(knowledgeSource.type, "confluence"),
+      sql`${knowledgeSource.settings}->'confluence'->>'cloudId' = ${cloudId}`,
+    ),
+    columns: { settings: true },
+  });
+  const added = new Set(existing.map((source) => source.settings?.confluence?.spaceId));
+  return spaces.map((space) => ({ ...space, alreadyAdded: added.has(space.id) }));
+}
+
+export async function addConfluenceSource(
+  productId: string,
+  input: { cloudId: string; spaceId: string; name?: string },
+): Promise<string> {
+  const access = await verifyProductAccess(productId);
+  await requireSourceQuota(productId, "/knowledge/add-confluence-source");
+  const connection = await requireConfluenceConnection(access.product.organizationId);
+
+  // Site and space details come from Atlassian, not the client.
+  const site = (await listConfluenceSites(connection.id)).find((candidate) => candidate.cloudId === input.cloudId);
+  if (!site) throw new Error("This Confluence site is not available to the connected Atlassian account");
+  let space: ConfluenceSpace;
+  try {
+    space = await getConfluenceSpace(connection.id, site.cloudId, input.spaceId);
+  } catch (error) {
+    if (error instanceof AtlassianApiError && (error.status === 403 || error.status === 404)) {
+      throw new Error("This space doesn't exist or the connected Atlassian account can't read it");
+    }
+    throw error;
+  }
+
+  const duplicate = await db.query.knowledgeSource.findFirst({
+    where: and(
+      eq(knowledgeSource.productId, productId),
+      eq(knowledgeSource.type, "confluence"),
+      sql`${knowledgeSource.settings}->'confluence'->>'cloudId' = ${site.cloudId}`,
+      sql`${knowledgeSource.settings}->'confluence'->>'spaceId' = ${space.id}`,
+    ),
+    columns: { id: true },
+  });
+  if (duplicate) throw new Error(`${space.name} is already in this knowledge base`);
+
+  const name = input.name?.trim().slice(0, MAX_NAME_LENGTH) || space.name;
+  const sourceId = crypto.randomUUID();
+  const now = new Date();
+  await db.insert(knowledgeSource).values({
+    id: sourceId,
+    productId,
+    type: "confluence",
+    name,
+    // No URL: retrieval falls back to the source URL for citations, and
+    // customers can't open Confluence pages.
+    url: null,
+    content: null,
+    settings: {
+      confluence: {
+        cloudId: site.cloudId,
+        siteUrl: site.url,
+        siteName: site.name,
+        spaceId: space.id,
+        spaceKey: space.key,
+        spaceName: space.name,
+      },
+    },
+    atlassianConnectionId: connection.id,
+    status: "indexing",
+    indexingStartedAt: now,
+    chunkCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await queueSourceIndexing(sourceId);
+  await auditKnowledge(productId, "knowledge.source_added", sourceId, {
+    type: "confluence",
+    name,
+    site: site.url,
+    space: space.key,
+  });
+  return sourceId;
+}
+
+/** Removes the workspace's Atlassian grant and every Confluence source built on it. */
+export async function disconnectConfluence(productId: string): Promise<void> {
+  const access = await verifyProductAccess(productId);
+  if (!isWorkspaceAdmin(access.membership.role)) {
+    throw new Error("Only workspace owners and admins can disconnect Confluence");
+  }
+  const connection = await requireConfluenceConnection(access.product.organizationId);
+  await deleteAtlassianConnection(access.product.organizationId);
+  await recordProductAudit({
+    productId,
+    actor: { id: access.session.user.id, name: access.session.user.name },
+    action: "knowledge.atlassian_disconnected",
+    targetType: "atlassian_connection",
+    targetId: connection.id,
+  });
 }
 
 export async function setSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {

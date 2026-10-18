@@ -9,6 +9,7 @@ import {
   FileText,
   Github,
   Globe,
+  Library,
   Lock,
   Pencil,
   RefreshCw,
@@ -37,6 +38,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { KnowledgeSourceSettings } from "@/db/schema";
+import { AUTO_SYNC_SOURCE_TYPES } from "@/lib/knowledge/source-types";
 
 import {
   deleteSource,
@@ -71,12 +73,14 @@ const TYPE_LABELS: Record<string, string> = {
   website: "Website",
   sitemap: "Website",
   github: "GitHub",
+  confluence: "Confluence",
 };
 
 function SourceIcon({ type }: { type: string }) {
   const className = "size-4 shrink-0 text-[color:var(--text-secondary)]";
   if (type === "url" || type === "sitemap" || type === "website") return <Globe className={className} />;
   if (type === "github") return <Github className={className} />;
+  if (type === "confluence") return <Library className={className} />;
   return <FileText className={className} />;
 }
 
@@ -120,14 +124,15 @@ function EditSourceDialog({
   const [isPending, startTransition] = useTransition();
   const isText = source.type === "article" || source.type === "conversation";
   const isWebsite = source.type === "website" || source.type === "sitemap";
-  const isGitHubApp = source.githubRepoId !== null;
+  // GitHub App repositories and Confluence spaces are chosen by ID, not URL.
+  const hasFixedLocation = source.githubRepoId !== null || source.type === "confluence";
 
   function handleSave() {
     startTransition(async () => {
       try {
         await updateSource(source.id, {
           name,
-          url: isText || isGitHubApp ? undefined : url,
+          url: isText || hasFixedLocation ? undefined : url,
           content: isText ? content : undefined,
           maxPages: isWebsite ? maxPages : undefined,
         });
@@ -162,7 +167,7 @@ function EditSourceDialog({
                 className="resize-y text-sm"
               />
             </div>
-          ) : isGitHubApp ? null : (
+          ) : hasFixedLocation ? null : (
             <div className="space-y-1.5">
               <Label htmlFor={`url-${source.id}`} className="text-xs text-[color:var(--text-secondary)]">URL</Label>
               <Input id={`url-${source.id}`} type="url" value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -258,8 +263,9 @@ function SourceCard({ source }: { source: Source }) {
   const [editing, setEditing] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const autoSync = ["url", "sitemap", "website", "github"].includes(source.type);
+  const autoSync = AUTO_SYNC_SOURCE_TYPES.includes(source.type);
   const github = source.githubRepoId !== null ? source.settings?.github : undefined;
+  const confluence = source.type === "confluence" ? source.settings?.confluence : undefined;
 
   function run(action: () => Promise<void>, success?: string) {
     startTransition(async () => {
@@ -322,6 +328,15 @@ function SourceCard({ source }: { source: Source }) {
           <span>· {github.branch ?? "default branch"}</span>
           {github.lastCommitSha && <span className="font-mono">· {github.lastCommitSha.slice(0, 7)}</span>}
           {github.includePaths.length > 0 && <span>· {github.includePaths.join(", ")}</span>}
+        </p>
+      )}
+
+      {confluence && (
+        <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-[color:var(--text-tertiary)]">
+          <span className="truncate">{confluence.siteName}</span>
+          <span>
+            · {confluence.spaceName} <span className="font-mono">({confluence.spaceKey})</span>
+          </span>
         </p>
       )}
 
@@ -409,7 +424,7 @@ export function SourceList({ sources }: { sources: Source[] }) {
         <BookOpen className="mb-3 size-6 text-[color:var(--text-tertiary)]" />
         <p className="text-sm font-medium text-foreground">No sources yet</p>
         <p className="mt-1 max-w-xs text-xs text-[color:var(--text-secondary)]">
-          Add articles, your help center website, or a GitHub repo so the AI can answer customer questions accurately.
+          Add articles, your help center website, a GitHub repo or a Confluence space so the AI can answer customer questions accurately.
         </p>
       </div>
     );

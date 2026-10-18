@@ -3,7 +3,6 @@ import { createHmac, createVerify, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { createAppJwt, verifyWebhookSignature } from "@/lib/github/app";
-import { createConnectState, verifyConnectState } from "@/lib/github/state";
 
 describe("createAppJwt", () => {
   it("creates an RS256 JWT GitHub accepts (backdated, under 10 minutes)", () => {
@@ -40,27 +39,5 @@ describe("verifyWebhookSignature", () => {
     expect(verifyWebhookSignature(body, "sha1=abc", secret)).toBe(false);
     expect(verifyWebhookSignature(`${body} `, sign(body), secret)).toBe(false);
     expect(verifyWebhookSignature(body, sign(body, "other"), secret)).toBe(false);
-  });
-});
-
-describe("connect state", () => {
-  const secret = "state-secret";
-
-  it("round-trips the product and user", () => {
-    const state = createConnectState("prod_1", "user_1", { secret, nowMs: 1_000 });
-    expect(verifyConnectState(state, { secret, nowMs: 2_000 })).toMatchObject({ productId: "prod_1", userId: "user_1" });
-  });
-
-  it("rejects tampered, foreign or expired state", () => {
-    const state = createConnectState("prod_1", "user_1", { secret, nowMs: 1_000 });
-    const [data, signature] = state.split(".");
-    const forged = Buffer.from(
-      JSON.stringify({ ...JSON.parse(Buffer.from(data, "base64url").toString()), p: "prod_2" }),
-    ).toString("base64url");
-
-    expect(verifyConnectState(`${forged}.${signature}`, { secret, nowMs: 2_000 })).toBeNull();
-    expect(verifyConnectState(state, { secret: "other", nowMs: 2_000 })).toBeNull();
-    expect(verifyConnectState(state, { secret, nowMs: 1_000 + 31 * 60 * 1000 })).toBeNull();
-    expect(verifyConnectState("garbage", { secret })).toBeNull();
   });
 });

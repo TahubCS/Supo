@@ -6,11 +6,10 @@ import { knowledgeSource } from "@/db/schema";
 import { isAuthorizedInternalRequest } from "@/lib/internal-auth";
 import { drainJobs, enqueueJob, JOB_TYPES } from "@/lib/jobs";
 import { STUCK_INDEXING_MS } from "@/lib/knowledge/ingest";
+import { AUTO_SYNC_SOURCE_TYPES } from "@/lib/knowledge/source-types";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
-
-const AUTO_SYNC_TYPES = ["url", "github", "sitemap", "website"];
 
 export async function GET(req: NextRequest) {
   if (!isAuthorizedInternalRequest(req.headers)) {
@@ -42,7 +41,7 @@ export async function GET(req: NextRequest) {
   //    re-embedded only if their content changed.
   const stale = await db.query.knowledgeSource.findMany({
     where: and(
-      inArray(knowledgeSource.type, AUTO_SYNC_TYPES),
+      inArray(knowledgeSource.type, [...AUTO_SYNC_SOURCE_TYPES]),
       eq(knowledgeSource.status, "indexed"),
       or(isNull(knowledgeSource.lastCheckedAt), lt(knowledgeSource.lastCheckedAt, staleThreshold)),
     ),

@@ -2,18 +2,22 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { env } from "@/lib/env";
 
-// Signed `state` for the GitHub App install/authorize round trip. It ties the
-// callback to the Supo user and product that started it and expires quickly.
+// Signed `state` for third-party connect round trips (GitHub App, Atlassian).
+// It ties the callback to the Supo user and product that started it, is valid
+// for one provider only, and expires quickly.
 
 const STATE_TTL_MS = 30 * 60 * 1000;
 
-export type GitHubConnectState = { productId: string; userId: string; expiresAt: number };
+export type ConnectProvider = "github" | "atlassian";
 
-function sign(data: string, secret: string): string {
-  return createHmac("sha256", `${secret}:github-connect-state`).update(data).digest("base64url");
+export type ConnectState = { productId: string; userId: string; expiresAt: number };
+
+function sign(data: string, secret: string, provider: ConnectProvider): string {
+  return createHmac("sha256", `${secret}:${provider}-connect-state`).update(data).digest("base64url");
 }
 
 export function createConnectState(
+  provider: ConnectProvider,
   productId: string,
   userId: string,
   { secret = env.BETTER_AUTH_SECRET, nowMs = Date.now() } = {},
@@ -21,16 +25,17 @@ export function createConnectState(
   const data = Buffer.from(
     JSON.stringify({ p: productId, u: userId, e: nowMs + STATE_TTL_MS, n: crypto.randomUUID() }),
   ).toString("base64url");
-  return `${data}.${sign(data, secret)}`;
+  return `${data}.${sign(data, secret, provider)}`;
 }
 
 export function verifyConnectState(
+  provider: ConnectProvider,
   state: string,
   { secret = env.BETTER_AUTH_SECRET, nowMs = Date.now() } = {},
-): GitHubConnectState | null {
+): ConnectState | null {
   const [data, signature, extra] = state.split(".");
   if (!data || !signature || extra !== undefined) return null;
-  const expected = Buffer.from(sign(data, secret));
+  const expected = Buffer.from(sign(data, secret, provider));
   const actual = Buffer.from(signature);
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
   try {
